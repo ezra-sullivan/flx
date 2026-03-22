@@ -198,6 +198,7 @@ items, err := out.CollectErr()
 
 ## 文档导航
 
+- 变更记录：[CHANGELOG.md](./CHANGELOG.md)
 - 快速上手：[doc/quickstart.md](./doc/quickstart.md)
 - 详细用法：[doc/guide.md](./doc/guide.md)
 - 架构设计：[doc/architecture.md](./doc/architecture.md)
