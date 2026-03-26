@@ -87,6 +87,7 @@ s := flx.From(func(out chan<- int) {
 
 - 你只负责写入，不需要关闭 channel
 - `flx` 会在生成函数返回后关闭内部 channel
+- 如果生产函数 panic，panic 会被记录到 stream 错误状态；`*Err` 终结操作会返回该错误，默认终结操作在 fail-fast 下会 panic
 
 ### `FromChan`
 
@@ -292,6 +293,13 @@ out := flx.DistinctBy(users, func(u User) string {
 })
 ```
 
+边界说明：
+
+- `DistinctBy` 会维护当前流中所有已见 key
+- 它适合有明确边界的批处理流
+- 如果唯一 key 数持续增长，内存会随之持续增长
+- 对无界流或超高基数流，不建议直接使用全局 `DistinctBy`
+
 ### `GroupBy`
 
 按 key 分组，输出 `Stream[[]T]`：
@@ -306,6 +314,52 @@ out := flx.GroupBy(users, func(u User) string {
 
 - 每组内部保持原始输入顺序
 - 组与组之间按 key 第一次出现的顺序输出
+- `GroupBy` 会在输出前消费并缓存整条输入流
+- 它不适合超大数据集或无界流
+- 如果你需要边界化内存的分组，优先考虑窗口化分组或自定义聚合逻辑
+
+### `DistinctByCount` / `GroupByCount`
+
+按输入数量做 tumbling window：
+
+```go
+out := flx.DistinctByCount(users, 1000, func(u User) string {
+	return u.Email
+})
+
+groups := flx.GroupByCount(users, 1000, func(u User) string {
+	return u.Team
+})
+```
+
+行为说明：
+- 每 `n` 个输入元素构成一个窗口
+- `DistinctByCount` 只在窗口内去重；跨窗口相同 key 会重新出现
+- `GroupByCount` 只在窗口内分组；输出类型是 `Stream[flx.Group[K, T]]`
+- 按量窗口比全局 `DistinctBy` / `GroupBy` 更接近硬内存边界
+
+### `DistinctByWindow` / `GroupByWindow`
+
+按 processing-time 做 tumbling window：
+
+```go
+ctx := context.Background()
+
+out := flx.DistinctByWindow(ctx, users, 5*time.Second, func(u User) string {
+	return u.Email
+})
+
+groups := flx.GroupByWindow(ctx, users, 5*time.Second, func(u User) string {
+	return u.Team
+})
+```
+
+行为说明：
+- 窗口在收到第一个元素时启动，空窗口不输出
+- `DistinctByWindow` 只在当前时间窗口内去重
+- `GroupByWindow` 会在窗口结束或上游关闭时输出当前窗口内的所有 group
+- `ctx.Done()` 后会停止处理，并尽快回收上游
+- 按时窗口提供的是软边界；如果你需要更稳定的内存上界，优先使用按量窗口
 
 ### `Chunk`
 
@@ -347,6 +401,7 @@ sum, err := flx.Reduce(flx.Values(1, 2, 3), func(ch <-chan int) (int, error) {
 注意：
 
 - `Reduce` 返回的错误会和 stream 内部错误合并
+- 如果 reducer 提前返回，`flx` 仍会自动 drain 剩余输入，保证上游 goroutine 能正常收敛
 
 ## 6. 终结与查询
 
@@ -422,6 +477,12 @@ v, ok, err := out.FirstErr()
 
 - `ok == false`
 
+补充说明：
+
+- `First` 仍然属于非 `*Err` 终结操作
+- 如果上游已经记录了 fail-fast 错误，`First` 会像 `Done` / `Collect` 一样 panic
+- 如果你需要显式错误返回，使用 `FirstErr`
+
 ### `Last` / `LastErr`
 
 获取最后一个元素：
@@ -446,6 +507,12 @@ none := out.NoneMatch(func(v int) bool { return v < 0 })
 - `AllMatchErr`
 - `AnyMatchErr`
 - `NoneMatchErr`
+
+补充说明：
+
+- 这些非 `*Err` 短路终结操作同样遵循 fail-fast 语义
+- 如果上游已经记录 fail-fast 错误，它们不会静默吞错，而是会 panic
+- 如果你需要稳定错误边界，优先使用对应的 `*Err` 版本
 
 ### `Max` / `Min`
 
@@ -616,6 +683,11 @@ ok := flx.SendContext(ctx, pipe, item)
 - `true`：发送成功
 - `false`：发送前已被取消
 
+补充说明：
+
+- `MapContext` / `MapContextErr` 的单结果发送已经内建取消感知
+- 你自己在 `FlatMapContext*` 或其它自定义 worker 中向下游发送值时，仍然应该优先使用 `SendContext`
+
 ### 缩容取消原因
 
 强制动态并发下，如果 worker 因缩容被取消，可以判断：
@@ -748,6 +820,8 @@ err := flx.DoWithTimeoutCtx(
 
 尤其是在 `FlatMapContext*` 和强制动态并发下。
 
+`MapContext*` 的单结果发送已经内建取消感知，但自定义多次发送场景仍然应显式使用 `SendContext`。
+
 ### 3. `WithUnlimitedWorkers` 要谨慎
 
 它很方便，但也最容易放大 goroutine 数量和内存压力。
@@ -759,12 +833,17 @@ err := flx.DoWithTimeoutCtx(
 - `Sort`
 - `Reverse`
 - `Collect`
+- `DistinctBy`
 - `GroupBy`
 
 补充说明：
 
 - `Tail(n)` 只保留最后 `n` 个元素
 - `Chunk(n)` 只保留当前 chunk，不会一次性缓存整个流
+- `DistinctBy` 的成本随唯一 key 数增长
+- `GroupBy` 的成本随整条输入流增长
+- `DistinctByCount` / `GroupByCount` 提供按量 tumbling window，更接近硬边界
+- `DistinctByWindow` / `GroupByWindow` 提供按时 tumbling window，属于软边界
 
 ### 5. 需要稳定错误行为时，用 `DoneErr` / `CollectErr`
 

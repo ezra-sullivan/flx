@@ -23,6 +23,15 @@ func (s Stream[T]) drainErr() error {
 	return s.Err()
 }
 
+func (s Stream[T]) drainIfPanicPending() {
+	if s.state == nil || !s.state.shouldPanic() {
+		return
+	}
+
+	drain(s.source)
+	s.maybePanicOnErr()
+}
+
 func (s Stream[T]) Done() {
 	drain(s.source)
 	s.maybePanicOnErr()
@@ -108,10 +117,12 @@ func (s Stream[T]) CollectErr() ([]T, error) {
 
 func (s Stream[T]) First() (T, bool) {
 	for item := range s.source {
+		s.drainIfPanicPending()
 		go drain(s.source)
 		return item, true
 	}
 
+	s.maybePanicOnErr()
 	var zero T
 	return zero, false
 }
@@ -153,10 +164,13 @@ func (s Stream[T]) LastErr() (T, bool, error) {
 func (s Stream[T]) AllMatch(predicate func(T) bool) bool {
 	for item := range s.source {
 		if !predicate(item) {
+			s.drainIfPanicPending()
 			go drain(s.source)
 			return false
 		}
 	}
+
+	s.maybePanicOnErr()
 	return true
 }
 
@@ -172,10 +186,13 @@ func (s Stream[T]) AllMatchErr(predicate func(T) bool) (bool, error) {
 func (s Stream[T]) AnyMatch(predicate func(T) bool) bool {
 	for item := range s.source {
 		if predicate(item) {
+			s.drainIfPanicPending()
 			go drain(s.source)
 			return true
 		}
 	}
+
+	s.maybePanicOnErr()
 	return false
 }
 
@@ -191,10 +208,13 @@ func (s Stream[T]) AnyMatchErr(predicate func(T) bool) (bool, error) {
 func (s Stream[T]) NoneMatch(predicate func(T) bool) bool {
 	for item := range s.source {
 		if predicate(item) {
+			s.drainIfPanicPending()
 			go drain(s.source)
 			return false
 		}
 	}
+
+	s.maybePanicOnErr()
 	return true
 }
 

@@ -68,3 +68,57 @@ func TestInterruptibleWorkersRequireContextTransform(t *testing.T) {
 		_ = Map(Values(1, 2, 3), func(v int) int { return v }, WithInterruptibleWorkers(ctrl))
 	})
 }
+
+func TestShortCircuitTerminalsPanicWhenFailFastErrorAlreadyRecorded(t *testing.T) {
+	errBoom := errors.New("boom")
+
+	newFailedStream := func(items ...int) Stream[int] {
+		source := make(chan int, len(items))
+		for _, item := range items {
+			source <- item
+		}
+		close(source)
+
+		state := newStreamState()
+		state.add(errBoom, true)
+		return streamWithState(source, state)
+	}
+
+	tests := []struct {
+		name string
+		run  func(Stream[int])
+	}{
+		{
+			name: "First",
+			run: func(s Stream[int]) {
+				_, _ = s.First()
+			},
+		},
+		{
+			name: "AllMatch",
+			run: func(s Stream[int]) {
+				_ = s.AllMatch(func(v int) bool { return v > 0 })
+			},
+		},
+		{
+			name: "AnyMatch",
+			run: func(s Stream[int]) {
+				_ = s.AnyMatch(func(v int) bool { return v == 1 })
+			},
+		},
+		{
+			name: "NoneMatch",
+			run: func(s Stream[int]) {
+				_ = s.NoneMatch(func(v int) bool { return v == 1 })
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertPanicIs(t, errBoom, func() {
+				tt.run(newFailedStream(1))
+			})
+		})
+	}
+}

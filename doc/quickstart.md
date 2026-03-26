@@ -101,6 +101,8 @@ s := flx.From(func(out chan<- int) {
 })
 ```
 
+如果生产函数 panic，错误会进入 stream 状态；使用 `CollectErr` / `DoneErr` 可以显式拿到，使用默认终结操作则会按 fail-fast 语义 panic。
+
 ### 从已有 channel 开始
 
 ```go
@@ -227,6 +229,8 @@ out := flx.FlatMapContext(
 	},
 )
 ```
+
+`MapContext` / `MapContextErr` 的单结果发送已经内建取消感知；你自己在 `FlatMapContext*` worker 里发送多个值时，仍然优先使用 `SendContext`。
 
 ## 8. 强制缩容
 

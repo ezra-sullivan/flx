@@ -82,6 +82,27 @@ func TestForAllPartialConsumerStillDrainsUpstreamProducer(t *testing.T) {
 	waitProducerDone(t, producerDone, "ForAll")
 }
 
+func TestReduceEarlyReturnStillDrainsUpstreamProducer(t *testing.T) {
+	stream, producerDone := testProducerStream(32)
+
+	got, err := Reduce(stream, func(source <-chan int) (int, error) {
+		item, ok := <-source
+		if !ok {
+			t.Fatal("expected Reduce source to have an item")
+		}
+
+		return item, nil
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("expected first item 0, got %d", got)
+	}
+
+	waitProducerDone(t, producerDone, "Reduce")
+}
+
 func testProducerStream(total int) (Stream[int], <-chan struct{}) {
 	done := make(chan struct{})
 	stream := From(func(source chan<- int) {

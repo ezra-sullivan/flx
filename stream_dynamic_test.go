@@ -108,6 +108,76 @@ func TestInterruptibleWorkersShrinkCancelsExtraWorkers(t *testing.T) {
 	}
 }
 
+func TestMapContextForcedDynamicWorkersCanceledSendReleasesSlots(t *testing.T) {
+	ctrl := NewConcurrencyController(1)
+
+	source := make(chan int, 4)
+	for i := range 4 {
+		source <- i
+	}
+	close(source)
+
+	var started atomic.Int32
+	firstStarted := make(chan struct{})
+	allStarted := make(chan struct{})
+	release := make(chan struct{})
+
+	out := MapContext(t.Context(), FromChan(source), func(ctx context.Context, item int) int {
+		switch started.Add(1) {
+		case 1:
+			close(firstStarted)
+		case 4:
+			close(allStarted)
+		}
+
+		<-release
+		return item
+	}, WithForcedDynamicWorkers(ctrl))
+
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("expected first worker to start")
+	}
+
+	ctrl.SetWorkers(4)
+
+	select {
+	case <-allStarted:
+	case <-time.After(time.Second):
+		t.Fatal("expected all workers to start after scale up")
+	}
+
+	ctrl.SetWorkers(1)
+	close(release)
+
+	deadline := time.Now().Add(time.Second)
+	for ctrl.ActiveWorkers() > 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got := ctrl.ActiveWorkers(); got > 1 {
+		t.Fatalf("expected canceled sends to release extra workers, active=%d", got)
+	}
+
+	select {
+	case <-out.source:
+	case <-time.After(time.Second):
+		t.Fatal("expected surviving worker output")
+	}
+
+	drain(out.source)
+
+	deadline = time.Now().Add(time.Second)
+	for ctrl.ActiveWorkers() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if got := ctrl.ActiveWorkers(); got != 0 {
+		t.Fatalf("expected worker slots to remain released after draining output, active=%d", got)
+	}
+}
+
 func TestFilterMapReduceWithDynamicWorkers(t *testing.T) {
 	ctrl := NewConcurrencyController(4)
 

@@ -19,13 +19,19 @@ func Values[T any](items ...T) Stream[T] {
 
 func From[T any](generate func(chan<- T)) Stream[T] {
 	source := make(chan T)
+	state := newStreamState()
 
-	goSafe(func() {
+	go func() {
 		defer close(source)
-		generate(source)
-	})
+		if err := runSafeFunc(func() error {
+			generate(source)
+			return nil
+		}); err != nil {
+			state.add(err, true)
+		}
+	}()
 
-	return newStream(source)
+	return streamWithState(source, state)
 }
 
 func FromChan[T any](source <-chan T) Stream[T] {

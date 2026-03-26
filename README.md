@@ -87,6 +87,8 @@ out := flx.Map(s, func(v int) string { return fmt.Sprintf("v=%d", v) })
 - `FlatMap` / `FlatMapErr`
 - `MapContext` / `FlatMapContext`
 - `DistinctBy` / `GroupBy` / `Chunk`
+- `DistinctByCount` / `GroupByCount`
+- `DistinctByWindow` / `GroupByWindow`
 - `Reduce`
 
 ### 终结与查询
@@ -117,6 +119,14 @@ out := flx.Map(s, func(v int) string { return fmt.Sprintf("v=%d", v) })
 - `Parallel` / `ParallelErr` / `ParallelWithErrorStrategy`
 - `DoWithRetry` / `DoWithRetryCtx`
 - `DoWithTimeout` / `DoWithTimeoutCtx`
+
+## 内存边界
+
+- `DistinctBy` 会维护当前流的全局已见 key 集合；如果唯一 key 持续增长，内存也会持续增长。
+- `GroupBy` 会先缓存整条输入流，再按 key 输出分组；它不适合超大数据集或无界流。
+- 这两个 API 更适合有明确边界的批处理数据。
+- `DistinctByCount` / `GroupByCount` 采用按输入数量切分的 tumbling window，适合需要更硬内存边界的去重/分组场景。
+- `DistinctByWindow` / `GroupByWindow` 采用 processing-time tumbling window，并显式接受 `context.Context`；它们更适合做按时归档或周期性输出。
 
 ## 动态并发
 
@@ -168,6 +178,8 @@ out.Done()
 
 `WithInterruptibleWorkers` 仍然可用，但新代码建议统一写成 `WithForcedDynamicWorkers`。
 
+`MapContext` / `MapContextErr` 的单结果发送现在也会响应 `ctx.Done()`；如果你在 `FlatMapContext*` 里自己向下游发送值，仍然建议显式使用 `SendContext`。
+
 ## 错误处理建议
 
 默认错误策略是 `ErrorStrategyFailFast`。如果 worker 返回错误或 panic：
@@ -182,6 +194,12 @@ out.Done()
 out := flx.MapErr(flx.Values("1", "x", "3"), strconv.Atoi)
 items, err := out.CollectErr()
 ```
+
+补充说明：
+
+- `From` 的生产函数如果 panic，会进入 stream 错误状态
+- `DoneErr` / `CollectErr` / `FirstErr` 等 `*Err` 终结操作可以显式拿到这类错误
+- `First` / `AllMatch` / `AnyMatch` / `NoneMatch` 这类短路终结操作也遵循 fail-fast 语义；如果上游已经记录 fail-fast 错误，它们会像其他非 `*Err` 终结操作一样 panic
 
 ## 与 fx 的主要差异
 
@@ -199,6 +217,9 @@ items, err := out.CollectErr()
 ## 文档导航
 
 - 变更记录：[CHANGELOG.md](./CHANGELOG.md)
+- 未发布变更碎片：[doc/changes/unreleased/README.md](./doc/changes/unreleased/README.md)
+- 正式版本说明：[doc/release-notes/README.md](./doc/release-notes/README.md)
+- 非 release 标签说明：[doc/tag-notes/README.md](./doc/tag-notes/README.md)
 - 快速上手：[doc/quickstart.md](./doc/quickstart.md)
 - 详细用法：[doc/guide.md](./doc/guide.md)
 - 架构设计：[doc/architecture.md](./doc/architecture.md)

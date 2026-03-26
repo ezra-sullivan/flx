@@ -3,6 +3,7 @@ package flx
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -87,5 +88,45 @@ func TestFirstLastMaxMinErrVariants(t *testing.T) {
 	minVal, ok, err := Values(3, 1, 4).MinErr(func(a, b int) bool { return a < b })
 	if err != nil || !ok || minVal != 1 {
 		t.Fatalf("unexpected MinErr result: min=%v ok=%v err=%v", minVal, ok, err)
+	}
+}
+
+func TestFromProducerPanicIsReturnedByErrTerminal(t *testing.T) {
+	items, err := From(func(source chan<- int) {
+		source <- 1
+		panic("from boom")
+	}).CollectErr()
+
+	if !slices.Equal(items, []int{1}) {
+		t.Fatalf("unexpected collected items: %v", items)
+	}
+	if err == nil || !strings.Contains(err.Error(), "from boom") {
+		t.Fatalf("expected CollectErr to include producer panic, got %v", err)
+	}
+}
+
+func TestFromProducerPanicTriggersNonErrTerminalPanic(t *testing.T) {
+	var recovered any
+
+	func() {
+		defer func() {
+			recovered = recover()
+		}()
+
+		From(func(source chan<- int) {
+			panic("from boom")
+		}).Done()
+	}()
+
+	if recovered == nil {
+		t.Fatal("expected Done to panic on producer panic")
+	}
+
+	err, ok := recovered.(error)
+	if !ok {
+		t.Fatalf("expected panic value to be error, got %T", recovered)
+	}
+	if !strings.Contains(err.Error(), "from boom") {
+		t.Fatalf("expected panic to mention producer panic, got %v", err)
 	}
 }
