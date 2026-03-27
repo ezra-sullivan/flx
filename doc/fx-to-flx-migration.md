@@ -88,6 +88,13 @@
 | `stream.Min(less)` | `stream.Min(less) (T, bool)` | 否 | `v, ok := s.Min(func(a, b int) bool { return a < b })` |
 | `stream.MinErr(less)` | `stream.MinErr(less) (T, bool, error)` | 否 | `v, ok, err := s.MinErr(less)` |
 
+行为补充：
+
+- `First` / `AllMatch` / `AnyMatch` / `NoneMatch` 这些非 `*Err` 短路终结操作会同步 drain 上游，优先保证 fail-fast 错误可见性
+- `FirstErr` / `AllMatchErr` / `AnyMatchErr` / `NoneMatchErr` 现在是真正短路：命中结果后立即返回，并在后台继续 drain 上游
+- 这四个短路 `*Err` API 返回的是当前错误快照；返回后才记录的晚到 fail-fast error 不保证包含在返回值中
+- 如果迁移后代码依赖“最终错误边界”，优先改用 `DoneErr` / `CollectErr`，或者用 `Head(1).CollectErr()` 显式保留首个元素
+
 ## 并发选项与上下文
 
 | 旧 API | 新 API | 是否兼容 | 示例 |

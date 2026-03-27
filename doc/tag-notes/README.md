@@ -17,4 +17,4 @@
 
 正式 release 版本说明应写入 `doc/release-notes/`，并在根目录 `CHANGELOG.md` 中保留摘要。
 
-当前仓库里已有的 `v0.1.0`、`v0.1.1`、`v0.1.2` 都按 tag note 管理，而不是 formal release note。
+当前仓库里已有的 `v0.1.0`、`v0.1.1`、`v0.1.2`、`v0.1.3` 都按 tag note 管理，而不是 formal release note。

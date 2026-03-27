@@ -188,7 +188,7 @@ out.Done()
 - `collect`：继续执行，最后合并错误
 - `log-and-continue`：记录日志并继续
 
-业务代码里推荐优先使用 `*Err` 变体，这样错误边界最清楚：
+业务代码里，如果你需要稳定的最终错误边界，优先使用会完整消费 source 的 `*Err` 终结操作，例如 `DoneErr` / `CollectErr`：
 
 ```go
 out := flx.MapErr(flx.Values("1", "x", "3"), strconv.Atoi)
@@ -198,7 +198,9 @@ items, err := out.CollectErr()
 补充说明：
 
 - `From` 的生产函数如果 panic，会进入 stream 错误状态
-- `DoneErr` / `CollectErr` / `FirstErr` 等 `*Err` 终结操作可以显式拿到这类错误
+- `DoneErr` / `CollectErr` 等完整消费型 `*Err` 终结操作可以显式拿到这类错误
+- `FirstErr` / `AllMatchErr` / `AnyMatchErr` / `NoneMatchErr` 现在是真正短路：命中结果后立即返回，并在后台 drain 上游
+- 这四个短路 `*Err` API 返回的是当前错误快照；返回后才发生的 fail-fast error 不保证包含在返回值里
 - `First` / `AllMatch` / `AnyMatch` / `NoneMatch` 这类短路终结操作也遵循 fail-fast 语义；如果上游已经记录 fail-fast 错误，它们会像其他非 `*Err` 终结操作一样 panic
 
 ## 与 fx 的主要差异

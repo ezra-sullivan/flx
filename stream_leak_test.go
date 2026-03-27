@@ -44,6 +44,54 @@ func TestShortCircuitOperatorsDrainUpstreamProducer(t *testing.T) {
 			},
 		},
 		{
+			name: "FirstErr",
+			run: func(s Stream[int]) {
+				got, ok, err := s.FirstErr()
+				if err != nil {
+					t.Fatalf("expected nil error, got %v", err)
+				}
+				if !ok || got != 0 {
+					t.Fatalf("expected first item 0, got %v (ok=%v)", got, ok)
+				}
+			},
+		},
+		{
+			name: "AnyMatchErr",
+			run: func(s Stream[int]) {
+				got, err := s.AnyMatchErr(func(item int) bool { return item == 0 })
+				if err != nil {
+					t.Fatalf("expected nil error, got %v", err)
+				}
+				if !got {
+					t.Fatal("expected AnyMatchErr to short-circuit with true")
+				}
+			},
+		},
+		{
+			name: "AllMatchErr",
+			run: func(s Stream[int]) {
+				got, err := s.AllMatchErr(func(item int) bool { return item > 0 })
+				if err != nil {
+					t.Fatalf("expected nil error, got %v", err)
+				}
+				if got {
+					t.Fatal("expected AllMatchErr to short-circuit with false")
+				}
+			},
+		},
+		{
+			name: "NoneMatchErr",
+			run: func(s Stream[int]) {
+				got, err := s.NoneMatchErr(func(item int) bool { return item == 0 })
+				if err != nil {
+					t.Fatalf("expected nil error, got %v", err)
+				}
+				if got {
+					t.Fatal("expected NoneMatchErr to short-circuit with false")
+				}
+			},
+		},
+		{
 			name: "Head",
 			run: func(s Stream[int]) {
 				if count := s.Head(1).Count(); count != 1 {

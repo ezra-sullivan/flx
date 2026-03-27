@@ -179,6 +179,11 @@ s := flx.Values(1, 2, 3, 4).Head(2)
 
 - `n < 1` 会 panic
 
+补充说明：
+
+- `Head` 在拿到前 `n` 个元素后，仍会继续 drain 上游再关闭自己的输出
+- 这样可以保证上游 goroutine 收敛，并让后续 `*Err` 终结操作看到晚到的 worker error
+
 ### `Tail`
 
 保留最后 `n` 个元素：
@@ -481,7 +486,10 @@ v, ok, err := out.FirstErr()
 
 - `First` 仍然属于非 `*Err` 终结操作
 - 如果上游已经记录了 fail-fast 错误，`First` 会像 `Done` / `Collect` 一样 panic
-- 如果你需要显式错误返回，使用 `FirstErr`
+- `First` 在拿到首个元素后，仍会等待上游 drain 完成，再决定是否暴露晚到的 fail-fast 错误
+- `FirstErr` 现在是真正短路：拿到首个元素后会立即返回，并在后台继续 drain 上游
+- `FirstErr` 返回的是当前时刻的错误快照；返回后才发生的 fail-fast error 不保证包含在 `err` 中
+- 如果你需要稳定的最终错误边界，优先使用 `CollectErr`，或者用 `Head(1).CollectErr()` 显式保留首个元素
 
 ### `Last` / `LastErr`
 
@@ -512,7 +520,10 @@ none := out.NoneMatch(func(v int) bool { return v < 0 })
 
 - 这些非 `*Err` 短路终结操作同样遵循 fail-fast 语义
 - 如果上游已经记录 fail-fast 错误，它们不会静默吞错，而是会 panic
-- 如果你需要稳定错误边界，优先使用对应的 `*Err` 版本
+- 命中短路条件后，它们仍会等待上游 drain 完成，避免晚到的 fail-fast 错误丢失
+- 对应的 `*Err` 版本现在是真正短路：命中条件后立即返回，并在后台 drain 上游
+- 这些 `*Err` 版本返回的是当前时刻的错误快照；返回后才发生的 fail-fast error 不保证包含在 `err` 中
+- 如果你需要稳定的最终错误边界，优先使用 `DoneErr` / `CollectErr` 等完整消费型终结操作
 
 ### `Max` / `Min`
 
@@ -650,7 +661,8 @@ if errors.As(err, &workerErr) {
 
 ### 实际建议
 
-- 业务代码默认优先用 `*Err` API
+- 业务代码里，如果你需要稳定的最终错误边界，优先使用完整消费型 `*Err` API，例如 `DoneErr` / `CollectErr`
+- `FirstErr` / `AllMatchErr` / `AnyMatchErr` / `NoneMatchErr` 现在是低延迟短路查询，返回的是当前错误快照而不是最终错误集合
 - 只有你明确接受“出错即 panic”时，再使用非 `*Err` 终结操作
 - 做批处理统计时，`ErrorStrategyCollect` 往往比 `fail-fast` 更合适
 
@@ -812,9 +824,11 @@ err := flx.DoWithTimeoutCtx(
 
 ## 13. 最佳实践
 
-### 1. 默认优先 `*Err`
+### 1. 默认优先稳定错误边界的终结操作
 
-这会让错误边界更明确，也更适合写测试。
+如果你需要最终错误结果，优先使用会完整消费 source 的终结操作，例如 `DoneErr` / `CollectErr`。
+
+`FirstErr` / `AllMatchErr` / `AnyMatchErr` / `NoneMatchErr` 更适合低延迟短路查询，而不是拿最终错误集合。
 
 ### 2. worker 向下游写入时优先 `SendContext`
 

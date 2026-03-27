@@ -24,14 +24,20 @@ func (r *ring[T]) Add(item T) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	if r.full {
-		r.elements[r.index%cap(r.elements)] = item
-	} else {
+	if !r.full {
 		r.elements = append(r.elements, item)
 		r.full = len(r.elements) == cap(r.elements)
+		if r.full {
+			r.index = 0
+		}
+		return
 	}
 
+	r.elements[r.index] = item
 	r.index++
+	if r.index == len(r.elements) {
+		r.index = 0
+	}
 }
 
 func (r *ring[T]) Take() []T {
@@ -47,7 +53,7 @@ func (r *ring[T]) Take() []T {
 		return slices.Clone(r.elements)
 	}
 
-	start := r.index % size
+	start := r.index
 	result := make([]T, size)
 	copy(result, r.elements[start:])
 	copy(result[size-start:], r.elements[:start])

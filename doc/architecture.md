@@ -253,6 +253,13 @@ func (s Stream[T]) Err() error
 
 空流返回 `ok == false`，不再依赖 `nil`。
 
+短路终结操作的语义约束：
+
+- `First` / `AllMatch` / `AnyMatch` / `NoneMatch` 这类非 `*Err` 短路终结操作会同步 drain 上游，再决定是否以 fail-fast 方式暴露错误
+- `FirstErr` / `AllMatchErr` / `AnyMatchErr` / `NoneMatchErr` 这类 `*Err` 短路终结操作优先保证低延迟返回：命中结果后立即返回当前错误快照，并在后台继续 drain 上游
+- 如果调用方需要稳定的最终错误边界，应使用 `DoneErr` / `CollectErr` 等完整消费型终结操作，而不是依赖短路 `*Err` API
+- `Head` 在拿到前 `n` 个元素后会先 drain 上游，再关闭自身输出，避免下游过早完成导致晚到的 worker error 不可见
+
 ## 5. 并发模型
 
 ## 5.1 执行模型

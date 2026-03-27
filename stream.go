@@ -174,8 +174,8 @@ func (s Stream[T]) Head(n int64) Stream[T] {
 				source <- item
 			}
 			if n == 0 {
-				close(source)
 				drain(s.source)
+				close(source)
 				return
 			}
 		}
