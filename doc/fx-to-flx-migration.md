@@ -185,3 +185,26 @@ if !ok {
     return
 }
 ```
+
+### 4. 如果你以前用 `value + error` 结构体在流里传递结果
+
+`flx` 不提供官方 `Result[T]` 之类的公共类型，因为它默认把错误建模为 stream 状态。迁移时先区分两类需求：
+
+- 如果你要的是“操作失败就进入统一错误边界”，优先改成 `MapErr` / `FlatMapErr`，并搭配 `CollectErr` / `DoneErr`
+- 如果你要的是“每条记录都保留自己的成功/失败结果，最后统一收集”，继续使用自定义结构体，把错误当普通数据
+
+```go
+type ItemResult[T any] struct {
+    Value T
+    Err   error
+}
+
+out := flx.Map(flx.Values("1", "x", "3"), func(v string) ItemResult[int] {
+    n, err := strconv.Atoi(v)
+    return ItemResult[int]{Value: n, Err: err}
+})
+
+results := out.Collect()
+```
+
+这种模式适合批处理统计、脏数据归档、部分成功场景；它不替代 `flx` 自身的 stream 错误模型。

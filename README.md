@@ -1,13 +1,13 @@
-# flx
+﻿# flx
 
 `flx` 是一个以泛型 `Stream[T]` 为核心的流式处理与动态并发控制库。
 
-它基于 `fx` 的并发语义重建，但不再保留为了兼容 go-zero `fx` API 而存在的包装层。整体目标很直接：
+它基于 go-zero  的 `fx`  并发语义重建，但不兼容  `fx` API 。整体目标很直接：
 
 - 用 `Stream[T]` 提供类型安全的流式处理
 - 保留固定并发、无限并发、动态并发和强制缩容能力
 - 用显式 `context.Context` 替代隐式 context option
-- 收敛旧版兼容接口，让 API 更贴近现代 Go
+- 让 API 更贴近现代 Go
 
 ## 适用场景
 
@@ -60,8 +60,28 @@ func main() {
 40
 ```
 
-## API 形状
+## 实战示例
 
+仓库里还带了一个可直接运行的 HTTP 图片处理 example：
+
+```powershell
+go run ./examples/http_image_pipeline
+```
+
+这个示例会：
+- 从 `https://picsum.photos/v2/list` 分页拉取图片
+- 下载大图并保存到 `examples/http_image_pipeline/output/original/`（默认 5 张）
+- 把大图缩成小图并保存到 `examples/http_image_pipeline/output/processed/`
+- 下载阶段会用 `flx.DoWithRetryCtx(...)` 自动重试，默认 3 次
+- 默认只做下载和处理，不做上传；如需上传，在 `examples/http_image_pipeline/main.go` 里填 `UploadEndpoint`
+
+两种实现都在仓库里：
+- stage 函数组合版：`examples/http_image_pipeline/stage_pipeline.go`
+- 原生 `flx` API 版：`examples/http_image_pipeline/native_pipeline.go`
+
+完整说明见 [doc/examples/http-image-pipeline.md](./doc/examples/http-image-pipeline.md)。
+
+## API 形状
 `flx` 采用“同类型操作保留方法，跨类型操作使用包级泛型函数”的混合设计。
 
 例如：
@@ -203,6 +223,9 @@ items, err := out.CollectErr()
 - 这四个短路 `*Err` API 返回的是当前错误快照；返回后才发生的 fail-fast error 不保证包含在返回值里
 - `First` / `AllMatch` / `AnyMatch` / `NoneMatch` 这类短路终结操作也遵循 fail-fast 语义；如果上游已经记录 fail-fast 错误，它们会像其他非 `*Err` 终结操作一样 panic
 
+`flx` 默认把错误建模为 stream 状态，而不是官方提供一个 `value + error` 的 item 容器。
+如果你从 `fx` 迁移过来，之前会在流里传 `struct{ Value T; Err error }` 这类结果对象，这种写法在 `flx` 里仍然可以保留，但它应该被视为业务数据建模：适合“部分成功、最后统一收集失败项”的场景，而不是替代 `MapErr` / `CollectErr` / `DoneErr` 这条主错误通道。
+
 ## 与 fx 的主要差异
 
 - `fx.Just` -> `flx.Values`
@@ -213,6 +236,7 @@ items, err := out.CollectErr()
 - `stream.Merge()` -> `stream.Collect()` / `stream.CollectErr()`
 - `fx.WithDynamicWorkersCtx` -> `flx.WithForcedDynamicWorkers`
 - `fx.SendCtx` -> `flx.SendContext`
+- `flx` 不提供官方 `Result[T]` / `ItemError[T]`；需要逐项结果时请自定义业务结构体
 
 完整迁移表见 [doc/fx-to-flx-migration.md](./doc/fx-to-flx-migration.md)。
 
@@ -224,6 +248,10 @@ items, err := out.CollectErr()
 - 非 release 标签说明：[doc/tag-notes/README.md](./doc/tag-notes/README.md)
 - 快速上手：[doc/quickstart.md](./doc/quickstart.md)
 - 详细用法：[doc/guide.md](./doc/guide.md)
+- 实战示例：[doc/examples/http-image-pipeline.md](./doc/examples/http-image-pipeline.md)
 - 架构设计：[doc/architecture.md](./doc/architecture.md)
 - 项目规划：[doc/project-plan.md](./doc/project-plan.md)
 - 迁移对照：[doc/fx-to-flx-migration.md](./doc/fx-to-flx-migration.md)
+
+
+

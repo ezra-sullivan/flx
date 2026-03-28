@@ -665,6 +665,35 @@ if errors.As(err, &workerErr) {
 - `FirstErr` / `AllMatchErr` / `AnyMatchErr` / `NoneMatchErr` 现在是低延迟短路查询，返回的是当前错误快照而不是最终错误集合
 - 只有你明确接受“出错即 panic”时，再使用非 `*Err` 终结操作
 - 做批处理统计时，`ErrorStrategyCollect` 往往比 `fail-fast` 更合适
+- `flx` 默认把错误建模为 stream 状态；如果你确实要把“每条数据自己的失败结果”继续往下游传，请自己定义业务结构体，并把它当普通数据处理
+
+### item 级结果模式
+
+如果你从 `fx` 迁移过来，之前习惯把 `error` 塞回每个 item，可以继续这样写，但要把它视为业务数据，而不是 `flx` 的官方错误模型：
+
+```go
+type ItemResult[T any] struct {
+	Value T
+	Err   error
+}
+
+out := flx.Map(flx.Values("1", "x", "3"), func(v string) ItemResult[int] {
+	n, err := strconv.Atoi(v)
+	return ItemResult[int]{Value: n, Err: err}
+})
+
+results := out.Collect()
+```
+
+适用场景：
+
+- 你要保留每条记录的成功/失败结果，最后统一统计、落库或归档
+- 你接受单条失败不终止流水线
+
+不适用场景：
+
+- 你希望 worker error、panic、timeout、context cancel 走统一的 stream 错误边界
+- 你需要 `DoneErr` / `CollectErr` 暴露最终错误
 
 ## 9. context 与取消
 
@@ -873,5 +902,21 @@ err := flx.DoWithTimeoutCtx(
 - `stream.Walk(...)` 改为 `flx.FlatMap(stream, ...)`
 - `WalkCtx*` 改为显式 `ctx` 的 `MapContext*` / `FlatMapContext*`
 - `First` / `Last` / `Max` / `Min` 现在都返回 `ok`
+- 如果你以前在流里传 `struct{ Value T; Err error }` 这类结果对象，`flx` 里继续自定义即可，但不要把它和 `MapErr` / `CollectErr` 视为同一层错误语义
 
 完整映射见 [fx-to-flx-migration.md](./fx-to-flx-migration.md)。
+
+## 15. 实战示例
+
+如果你想看一条包含多个 stage、且每个 stage 使用不同 worker 策略的 HTTP pipeline，可以参考这个完整示例：
+
+- [HTTP 图片处理流水线示例](./examples/http-image-pipeline.md)
+
+这个示例展示了：
+
+- HTTP 分页列出图片
+- 固定 worker 下载
+- 动态 worker 做缩放
+- 固定 worker 加水印并上传
+- 推荐的 stage 函数组合写法
+- 对照的原生 `flx` API 逐段拼接写法

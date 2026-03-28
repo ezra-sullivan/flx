@@ -370,6 +370,14 @@ const (
 - `LogAndContinue`
   - 仅日志输出，不中断流水线
 
+### 7.4 item 级业务结果
+
+`flx` 的主错误语义是“错误进入 stream 状态”，而不是给每个 item 官方附带一个 `error` 字段。
+
+- 库本身不提供官方 `Result[T]` / `ItemError[T]` 公共类型，避免和 `MapErr` / `CollectErr` / `DoneErr` 形成双轨错误模型
+- 如果调用方确实需要“逐项成功/失败都作为数据继续流转”，应自行定义领域结构体，并把它当普通 `Stream[T]` 数据处理
+- worker panic、context cancel、timeout 等运行时失败仍属于 stream 错误，而不是 item 数据
+
 ## 8. retry / timeout
 
 保留 `fx` 的主语义，但 API 只保留收敛后的版本：
