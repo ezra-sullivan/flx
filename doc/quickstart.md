@@ -301,4 +301,4 @@ err := flx.DoWithTimeout(func() error {
 
 - 需要完整 API 说明和边界行为：看 [guide.md](./guide.md)
 - 需要理解内部并发模型：看 [architecture.md](./architecture.md)
-- 需要从 `fx` 迁移：看 [fx-to-flx-migration.md](./fx-to-flx-migration.md)
+- 需要从 `fx` 迁移：先看 README 和 `guide.md` 里的 API 对照与语义说明

@@ -238,7 +238,7 @@ items, err := out.CollectErr()
 - `fx.SendCtx` -> `flx.SendContext`
 - `flx` 不提供官方 `Result[T]` / `ItemError[T]`；需要逐项结果时请自定义业务结构体
 
-完整迁移表见 [doc/fx-to-flx-migration.md](./doc/fx-to-flx-migration.md)。
+如果你从 `fx` 迁移，建议结合本 README、`doc/quickstart.md` 和 `doc/guide.md` 中的 API 对照与语义说明逐步调整。
 
 ## 文档导航
 
@@ -250,8 +250,6 @@ items, err := out.CollectErr()
 - 详细用法：[doc/guide.md](./doc/guide.md)
 - 实战示例：[doc/examples/http-image-pipeline.md](./doc/examples/http-image-pipeline.md)
 - 架构设计：[doc/architecture.md](./doc/architecture.md)
-- 项目规划：[doc/project-plan.md](./doc/project-plan.md)
-- 迁移对照：[doc/fx-to-flx-migration.md](./doc/fx-to-flx-migration.md)
 
 
 

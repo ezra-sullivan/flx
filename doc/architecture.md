@@ -28,7 +28,6 @@ flx/
 ├── go.mod
 ├── README.md
 ├── doc/
-│   ├── project-plan.md
 │   ├── architecture.md
 │   ├── quickstart.md
 │   └── guide.md
@@ -398,7 +397,7 @@ func DoWithTimeoutCtx(fn func(context.Context) error, timeout time.Duration, opt
 
 ## 9. 与 `fx` 的迁移关系
 
-完整迁移对照表见 [fx-to-flx-migration.md](./fx-to-flx-migration.md)。
+如需从 `fx` 迁移，请结合 README、`quickstart.md` 和 `guide.md` 中的 API 对照与语义说明逐步调整。
 
 | `fx` | `flx` |
 |---|---|

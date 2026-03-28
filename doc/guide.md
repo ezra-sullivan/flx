@@ -904,7 +904,7 @@ err := flx.DoWithTimeoutCtx(
 - `First` / `Last` / `Max` / `Min` 现在都返回 `ok`
 - 如果你以前在流里传 `struct{ Value T; Err error }` 这类结果对象，`flx` 里继续自定义即可，但不要把它和 `MapErr` / `CollectErr` 视为同一层错误语义
 
-完整映射见 [fx-to-flx-migration.md](./fx-to-flx-migration.md)。
+如需从 `fx` 迁移，请结合 README 和 `quickstart.md` 中的 API 对照说明逐步替换。
 
 ## 15. 实战示例
 
