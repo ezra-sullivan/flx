@@ -3,10 +3,7 @@
 .claude/
 AGENTS.md
 
-# development doc
-learn-doc/
-bugfix-doc/
-optimize-doc/
+# local private docs
 .local-doc/
 
 
@@ -15,6 +12,7 @@ optimize-doc/
 cover
 coverage.out
 *.coverprofile
+*.output
 .output/
 .tmp/
 
