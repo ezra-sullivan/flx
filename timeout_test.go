@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// These tests cover timeout validation, context propagation, cancellation causes, and panic rethrow behavior.
 func TestDoWithTimeoutPanicsOnInvalidInputs(t *testing.T) {
 	t.Run("negative timeout", func(t *testing.T) {
 		assertPanicIs(t, ErrNegativeTimeout, func() {
@@ -41,6 +42,25 @@ func TestDoWithTimeoutDoesNotStartWhenContextAlreadyDone(t *testing.T) {
 	}
 }
 
+func TestDoWithTimeoutReturnsParentCancelCauseWhenContextAlreadyDone(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	cause := errors.New("parent stopped timeout before start")
+	cancel(cause)
+
+	var started atomic.Int32
+	err := DoWithTimeout(func() error {
+		started.Add(1)
+		return nil
+	}, time.Second, WithContext(ctx))
+
+	if !errors.Is(err, cause) {
+		t.Fatalf("expected cancel cause %v, got %v", cause, err)
+	}
+	if got := started.Load(); got != 0 {
+		t.Fatalf("expected fn not to start when parent ctx already done, got %d", got)
+	}
+}
+
 func TestDoWithTimeoutCtxPassesDerivedContext(t *testing.T) {
 	var sawDeadline atomic.Bool
 
@@ -67,6 +87,29 @@ func TestDoWithTimeoutCtxReturnsTimeout(t *testing.T) {
 
 	if !errors.Is(err, ErrTimeout) {
 		t.Fatalf("expected timeout error, got %v", err)
+	}
+}
+
+func TestDoWithTimeoutCtxReturnsParentCancelCause(t *testing.T) {
+	parent, cancel := context.WithCancelCause(t.Context())
+	cause := errors.New("parent stopped timeout in flight")
+	started := make(chan struct{})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- DoWithTimeoutCtx(func(ctx context.Context) error {
+			close(started)
+			<-ctx.Done()
+			return ctx.Err()
+		}, time.Second, WithContext(parent))
+	}()
+
+	<-started
+	cancel(cause)
+
+	err := <-errCh
+	if !errors.Is(err, cause) {
+		t.Fatalf("expected cancel cause %v, got %v", cause, err)
 	}
 }
 

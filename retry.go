@@ -11,16 +11,26 @@ import (
 const defaultRetryTimes = 3
 
 var (
-	ErrInvalidRetryTimes              = errors.New("flx: retry times must be greater than 0")
-	ErrNegativeRetryInterval          = errors.New("flx: retry interval must not be negative")
-	ErrNegativeRetryTimeout           = errors.New("flx: retry timeout must not be negative")
-	ErrNegativeAttemptTimeout         = errors.New("flx: attempt timeout must not be negative")
+	// ErrInvalidRetryTimes reports that a retry count was zero or negative.
+	ErrInvalidRetryTimes = errors.New("flx: retry times must be greater than 0")
+	// ErrNegativeRetryInterval reports that a retry interval was negative.
+	ErrNegativeRetryInterval = errors.New("flx: retry interval must not be negative")
+	// ErrNegativeRetryTimeout reports that a total retry timeout was negative.
+	ErrNegativeRetryTimeout = errors.New("flx: retry timeout must not be negative")
+	// ErrNegativeAttemptTimeout reports that a per-attempt timeout was negative.
+	ErrNegativeAttemptTimeout = errors.New("flx: attempt timeout must not be negative")
+	// ErrAttemptTimeoutRequiresRetryCtx reports that attempt timeouts only work
+	// with the context-aware retry API.
 	ErrAttemptTimeoutRequiresRetryCtx = errors.New("flx: WithAttemptTimeout requires DoWithRetryCtx")
-	ErrRetryAttemptTimeout            = errors.New("flx: retry attempt timeout")
+	// ErrRetryAttemptTimeout reports that one retry attempt exceeded its own
+	// attempt timeout.
+	ErrRetryAttemptTimeout = errors.New("flx: retry attempt timeout")
 )
 
+// RetryOption mutates the behavior of one retry call.
 type RetryOption func(*retryOptions)
 
+// retryOptions stores the validated settings for one retry loop.
 type retryOptions struct {
 	times          int
 	interval       time.Duration
@@ -29,16 +39,21 @@ type retryOptions struct {
 	ignoreErrors   []error
 }
 
+// DoWithRetry executes fn until it succeeds or the retry budget is exhausted.
 func DoWithRetry(fn func() error, opts ...RetryOption) error {
 	return retry(context.Background(), false, func(_ context.Context, _ int) error {
 		return fn()
 	}, opts...)
 }
 
+// DoWithRetryCtx executes fn until it succeeds or the retry budget is
+// exhausted, passing the current attempt context and zero-based attempt index.
 func DoWithRetryCtx(ctx context.Context, fn func(context.Context, int) error, opts ...RetryOption) error {
 	return retry(requireContext(ctx), true, fn, opts...)
 }
 
+// retry implements the shared retry loop for context-aware and context-free
+// entry points.
 func retry(ctx context.Context, cooperative bool, fn func(context.Context, int) error, opts ...RetryOption) error {
 	options := newRetryOptions()
 	for _, opt := range opts {
@@ -55,7 +70,7 @@ func retry(ctx context.Context, cooperative bool, fn func(context.Context, int) 
 
 	for attempt := range options.times {
 		if err := ctx.Err(); err != nil {
-			errs.Add(err)
+			errs.Add(contextDoneErr(ctx))
 			return errs.Err()
 		}
 
@@ -88,10 +103,7 @@ func retry(ctx context.Context, cooperative bool, fn func(context.Context, int) 
 			errs.Add(err)
 		case <-attemptCtx.Done():
 			cancelAttempt()
-			cause := context.Cause(attemptCtx)
-			if cause == nil {
-				cause = attemptCtx.Err()
-			}
+			cause := contextDoneErr(attemptCtx)
 
 			if errors.Is(cause, ErrRetryAttemptTimeout) {
 				errs.Add(cause)
@@ -108,7 +120,7 @@ func retry(ctx context.Context, cooperative bool, fn func(context.Context, int) 
 				if !timer.Stop() {
 					<-timer.C
 				}
-				errs.Add(ctx.Err())
+				errs.Add(contextDoneErr(ctx))
 				return errs.Err()
 			case <-timer.C:
 			}
@@ -118,40 +130,48 @@ func retry(ctx context.Context, cooperative bool, fn func(context.Context, int) 
 	return errs.Err()
 }
 
+// WithIgnoreErrors treats matching errors as successful completion.
 func WithIgnoreErrors(ignoreErrors []error) RetryOption {
 	return func(options *retryOptions) {
 		options.ignoreErrors = slices.Clone(ignoreErrors)
 	}
 }
 
+// WithInterval sets the delay between failed attempts.
 func WithInterval(interval time.Duration) RetryOption {
 	return func(options *retryOptions) {
 		options.interval = interval
 	}
 }
 
+// WithRetry sets the maximum number of attempts, including the first one.
 func WithRetry(times int) RetryOption {
 	return func(options *retryOptions) {
 		options.times = times
 	}
 }
 
+// WithTimeout sets an overall timeout for the full retry loop.
 func WithTimeout(timeout time.Duration) RetryOption {
 	return func(options *retryOptions) {
 		options.timeout = timeout
 	}
 }
 
+// WithAttemptTimeout sets a timeout for each individual retry attempt.
 func WithAttemptTimeout(timeout time.Duration) RetryOption {
 	return func(options *retryOptions) {
 		options.attemptTimeout = timeout
 	}
 }
 
+// newRetryOptions returns the default retry configuration.
 func newRetryOptions() *retryOptions {
 	return &retryOptions{times: defaultRetryTimes}
 }
 
+// validateRetryOptions panics when retry settings are invalid for the chosen
+// API variant.
 func validateRetryOptions(options *retryOptions, cooperative bool) {
 	switch {
 	case options.times <= 0:
@@ -167,15 +187,8 @@ func validateRetryOptions(options *retryOptions, cooperative bool) {
 	}
 }
 
+// normalizeRetryAttemptError rewrites context-related attempt errors to the
+// canonical context cause.
 func normalizeRetryAttemptError(ctx context.Context, err error) error {
-	if err == nil {
-		return nil
-	}
-
-	cause := context.Cause(ctx)
-	if cause != nil && errors.Is(err, ctx.Err()) {
-		return cause
-	}
-
-	return err
+	return normalizeContextErr(ctx, err)
 }

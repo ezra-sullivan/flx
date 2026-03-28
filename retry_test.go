@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// These tests cover retry validation, cancellation, timeout, and panic conversion behavior.
 func TestDoWithRetryPanicsOnInvalidOptions(t *testing.T) {
 	t.Run("zero retry times", func(t *testing.T) {
 		assertPanicIs(t, ErrInvalidRetryTimes, func() {
@@ -73,6 +74,25 @@ func TestDoWithRetryCtxPassesDerivedTimeoutContext(t *testing.T) {
 	}
 }
 
+func TestDoWithRetryCtxReturnsParentCancelCauseWhenContextAlreadyDone(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	cause := errors.New("parent stopped retry before start")
+	cancel(cause)
+
+	var started atomic.Int32
+	err := DoWithRetryCtx(ctx, func(ctx context.Context, retryCount int) error {
+		started.Add(1)
+		return nil
+	})
+
+	if !errors.Is(err, cause) {
+		t.Fatalf("expected cancel cause %v, got %v", cause, err)
+	}
+	if got := started.Load(); got != 0 {
+		t.Fatalf("expected callback not to start when parent ctx already done, got %d", got)
+	}
+}
+
 func TestDoWithRetryReturnsPanicAsError(t *testing.T) {
 	err := DoWithRetry(func() error {
 		panic("retry boom")
@@ -100,5 +120,39 @@ func TestDoWithRetryCtxRetriesOnAttemptTimeout(t *testing.T) {
 	}
 	if got := attempts.Load(); got != 2 {
 		t.Fatalf("expected 2 timed out attempts, got %d", got)
+	}
+}
+
+func TestDoWithRetryCtxReturnsParentCancelCauseWhileWaitingForNextAttempt(t *testing.T) {
+	parent, cancel := context.WithCancelCause(t.Context())
+	cause := errors.New("parent stopped retry between attempts")
+	attemptErr := errors.New("attempt failed")
+	unexpectedRetryErr := errors.New("unexpected extra retry attempt")
+	firstAttemptDone := make(chan struct{})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- DoWithRetryCtx(parent, func(ctx context.Context, retryCount int) error {
+			if retryCount == 0 {
+				close(firstAttemptDone)
+				return attemptErr
+			}
+
+			return unexpectedRetryErr
+		}, WithRetry(2), WithInterval(time.Second))
+	}()
+
+	<-firstAttemptDone
+	cancel(cause)
+
+	err := <-errCh
+	if errors.Is(err, unexpectedRetryErr) {
+		t.Fatalf("expected cancellation before the next retry attempt, got %v", err)
+	}
+	if !errors.Is(err, attemptErr) {
+		t.Fatalf("expected aggregated error to contain attempt error %v, got %v", attemptErr, err)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("expected aggregated error to contain cancel cause %v, got %v", cause, err)
 	}
 }
