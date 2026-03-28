@@ -1,9 +1,21 @@
+# development tools
 .idea/
+.claude/
+AGENTS.md
+
+# development doc
+learn-doc/
+bugfix-doc/
+optimize-doc/
+
+
 
 # Coverage artifacts
 cover
 coverage.out
 *.coverprofile
+.output/
+.tmp/
 
 # Go test binaries
 *.test
@@ -11,3 +23,8 @@ coverage.out
 # OS metadata
 Thumbs.db
 .DS_Store
+
+
+
+# machine info
+.info/
