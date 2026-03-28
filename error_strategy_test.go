@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// These tests cover worker error strategy behavior across terminals and helper APIs.
 func TestDonePanicsOnFailFastError(t *testing.T) {
 	errBoom := errors.New("boom")
 

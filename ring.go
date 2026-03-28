@@ -5,6 +5,8 @@ import (
 	"sync"
 )
 
+// ring stores the last n items in insertion order and is safe for concurrent
+// use.
 type ring[T any] struct {
 	elements []T
 	index    int
@@ -12,6 +14,7 @@ type ring[T any] struct {
 	lock     sync.RWMutex
 }
 
+// newRing allocates a ring buffer that can hold exactly n items.
 func newRing[T any](n int) *ring[T] {
 	if n < 1 {
 		panic("ring size must be positive")
@@ -20,6 +23,7 @@ func newRing[T any](n int) *ring[T] {
 	return &ring[T]{elements: make([]T, 0, n)}
 }
 
+// Add appends item, overwriting the oldest value once the ring is full.
 func (r *ring[T]) Add(item T) {
 	r.lock.Lock()
 	defer r.lock.Unlock()
@@ -40,6 +44,7 @@ func (r *ring[T]) Add(item T) {
 	}
 }
 
+// Take returns the current contents from oldest to newest.
 func (r *ring[T]) Take() []T {
 	r.lock.RLock()
 	defer r.lock.RUnlock()

@@ -5,6 +5,7 @@ import (
 	"sync"
 )
 
+// transformErr adapts non-context transforms to the shared runtime walkers.
 func transformErr[T, U any](s Stream[T], fn func(T, chan<- U) error, opts ...Option) Stream[U] {
 	options := buildOptions(opts...)
 	if options.interruptible {
@@ -27,6 +28,8 @@ func transformErr[T, U any](s Stream[T], fn func(T, chan<- U) error, opts ...Opt
 	}
 }
 
+// transformContextErr routes context-aware transforms to the appropriate worker
+// runtime based on the configured options.
 func transformContextErr[T, U any](ctx context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, opts ...Option) Stream[U] {
 	options := buildOptions(opts...)
 
@@ -42,6 +45,7 @@ func transformContextErr[T, U any](ctx context.Context, s Stream[T], fn func(con
 	}
 }
 
+// walkLimited runs fn with a fixed-size worker pool.
 func walkLimited[T, U any](parent context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, option *opOptions) Stream[U] {
 	pipe := make(chan U, option.workers)
 
@@ -99,6 +103,7 @@ func walkLimited[T, U any](parent context.Context, s Stream[T], fn func(context.
 	return streamWithState(pipe, s.state)
 }
 
+// walkUnlimited runs fn with one goroutine per input item.
 func walkUnlimited[T, U any](parent context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, option *opOptions) Stream[U] {
 	pipe := make(chan U, unlimitedWorkerBuffer)
 
@@ -141,6 +146,8 @@ func walkUnlimited[T, U any](parent context.Context, s Stream[T], fn func(contex
 	return streamWithState(pipe, s.state)
 }
 
+// walkDynamic runs fn under a resizable semaphore without canceling workers
+// that already acquired a slot.
 func walkDynamic[T, U any](parent context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, option *opOptions) Stream[U] {
 	ctrl := option.controller
 	pipe := make(chan U, ctrl.Workers())
@@ -196,6 +203,8 @@ func walkDynamic[T, U any](parent context.Context, s Stream[T], fn func(context.
 	return streamWithState(pipe, s.state)
 }
 
+// walkInterruptible runs fn under a resizable semaphore and cancels excess
+// workers when the controller shrinks.
 func walkInterruptible[T, U any](parent context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, option *opOptions) Stream[U] {
 	ctrl := option.controller
 	pipe := make(chan U, ctrl.Workers())
@@ -258,6 +267,7 @@ func walkInterruptible[T, U any](parent context.Context, s Stream[T], fn func(co
 	return streamWithState(pipe, s.state)
 }
 
+// acquirePool waits for one fixed-pool slot or returns the context error.
 func acquirePool(ctx context.Context, pool chan struct{}) error {
 	select {
 	case <-ctx.Done():
@@ -267,6 +277,7 @@ func acquirePool(ctx context.Context, pool chan struct{}) error {
 	}
 }
 
+// receiveItem reads the next source item unless ctx has already been canceled.
 func receiveItem[T any](ctx context.Context, source <-chan T) (item T, ok bool, canceled bool) {
 	select {
 	case <-ctx.Done():
@@ -285,6 +296,7 @@ func receiveItem[T any](ctx context.Context, source <-chan T) (item T, ok bool, 
 	}
 }
 
+// drain consumes and discards all remaining values from source.
 func drain[T any](source <-chan T) {
 	for range source {
 	}

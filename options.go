@@ -9,10 +9,15 @@ const (
 )
 
 var (
-	ErrNilController                               = errors.New("flx: nil concurrency controller")
+	// ErrNilController reports that a dynamic-worker option received a nil
+	// concurrency controller.
+	ErrNilController = errors.New("flx: nil concurrency controller")
+	// ErrInterruptibleWorkersRequireContextTransform reports that forced dynamic
+	// workers were requested for a transform that does not accept a context.
 	ErrInterruptibleWorkersRequireContextTransform = errors.New("flx: WithInterruptibleWorkers/WithForcedDynamicWorkers requires MapContext/FlatMapContext")
 )
 
+// opOptions stores execution settings for one transform or terminal operation.
 type opOptions struct {
 	workers       int
 	unlimited     bool
@@ -21,6 +26,7 @@ type opOptions struct {
 	errorStrategy ErrorStrategy
 }
 
+// Option mutates the execution settings for one transform or terminal call.
 type Option func(*opOptions)
 
 // WithWorkers limits the current operation to a fixed number of workers.
@@ -42,8 +48,8 @@ func WithUnlimitedWorkers() Option {
 	}
 }
 
-// WithDynamicWorkers enables graceful dynamic resizing for the current operation.
-// Shrinking does not interrupt workers that already hold a slot.
+// WithDynamicWorkers enables graceful dynamic resizing for the current
+// operation. Shrinking does not interrupt workers that already hold a slot.
 func WithDynamicWorkers(controller *ConcurrencyController) Option {
 	return func(opts *opOptions) {
 		if controller == nil {
@@ -56,8 +62,9 @@ func WithDynamicWorkers(controller *ConcurrencyController) Option {
 	}
 }
 
-// WithForcedDynamicWorkers enables forced dynamic resizing for the current operation.
-// Shrinking cancels excess workers via context and only works with MapContext/FlatMapContext.
+// WithForcedDynamicWorkers enables forced dynamic resizing for the current
+// operation. Shrinking cancels excess workers via context and only works with
+// MapContext or FlatMapContext variants.
 func WithForcedDynamicWorkers(controller *ConcurrencyController) Option {
 	return func(opts *opOptions) {
 		if controller == nil {
@@ -70,12 +77,14 @@ func WithForcedDynamicWorkers(controller *ConcurrencyController) Option {
 	}
 }
 
-// WithInterruptibleWorkers is kept as a compatibility alias for WithForcedDynamicWorkers.
+// WithInterruptibleWorkers is a compatibility alias for
+// WithForcedDynamicWorkers.
 func WithInterruptibleWorkers(controller *ConcurrencyController) Option {
 	return WithForcedDynamicWorkers(controller)
 }
 
-// WithErrorStrategy configures how worker panic/error is handled for the current operation.
+// WithErrorStrategy configures how worker panics and errors are handled for the
+// current operation.
 func WithErrorStrategy(strategy ErrorStrategy) Option {
 	return func(opts *opOptions) {
 		mustValidateErrorStrategy(strategy)
@@ -83,6 +92,7 @@ func WithErrorStrategy(strategy ErrorStrategy) Option {
 	}
 }
 
+// newOptions returns the default operation settings.
 func newOptions() *opOptions {
 	return &opOptions{
 		workers:       defaultWorkers,
@@ -90,6 +100,7 @@ func newOptions() *opOptions {
 	}
 }
 
+// buildOptions applies opts in order on top of the default settings.
 func buildOptions(opts ...Option) *opOptions {
 	options := newOptions()
 	for _, opt := range opts {

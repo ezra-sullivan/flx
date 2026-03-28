@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// These tests cover stream behaviors that do not fit a single transform or terminal category.
 func TestConcatReflectsUpstreamErrorsImmediately(t *testing.T) {
 	leftSource := make(chan int)
 	rightSource := make(chan int)

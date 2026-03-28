@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// These tests cover dynamic and interruptible worker behavior for stream transforms.
 func TestFlatMapWithDynamicWorkersRespectsConcurrency(t *testing.T) {
 	ctrl := NewConcurrencyController(4)
 	var maxConcurrent atomic.Int32

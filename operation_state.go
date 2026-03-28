@@ -7,26 +7,34 @@ import (
 	"sync/atomic"
 )
 
+// streamState stores the errors produced by one stream and whether non-Err
+// terminals should panic when they observe those errors.
 type streamState struct {
 	errs            batchError
 	panicOnTerminal atomic.Bool
 }
 
+// streamStateHandle abstracts local and merged stream error state.
 type streamStateHandle interface {
 	add(err error, panicOnTerminal bool)
 	err() error
 	shouldPanic() bool
 }
 
+// mergedStreamState combines local errors with one or more parent stream
+// states so derived streams can reflect upstream failures immediately.
 type mergedStreamState struct {
 	local   *streamState
 	parents []streamStateHandle
 }
 
+// newStreamState returns an empty local stream error state.
 func newStreamState() *streamState {
 	return &streamState{}
 }
 
+// add records err in the local state and optionally marks non-Err terminals to
+// panic when they observe the aggregated failure.
 func (s *streamState) add(err error, panicOnTerminal bool) {
 	if s == nil || err == nil {
 		return
@@ -38,6 +46,7 @@ func (s *streamState) add(err error, panicOnTerminal bool) {
 	}
 }
 
+// err returns the joined local error state.
 func (s *streamState) err() error {
 	if s == nil {
 		return nil
@@ -46,10 +55,14 @@ func (s *streamState) err() error {
 	return s.errs.Err()
 }
 
+// shouldPanic reports whether non-Err terminals should panic on recorded
+// errors.
 func (s *streamState) shouldPanic() bool {
 	return s != nil && s.panicOnTerminal.Load()
 }
 
+// newMergedStreamState creates a state that adds local errors on top of the
+// current error state from parents.
 func newMergedStreamState(parents ...streamStateHandle) *mergedStreamState {
 	return &mergedStreamState{
 		local:   newStreamState(),
@@ -57,6 +70,7 @@ func newMergedStreamState(parents ...streamStateHandle) *mergedStreamState {
 	}
 }
 
+// add records an error that originates from the derived stream itself.
 func (s *mergedStreamState) add(err error, panicOnTerminal bool) {
 	if s == nil {
 		return
@@ -65,27 +79,30 @@ func (s *mergedStreamState) add(err error, panicOnTerminal bool) {
 	s.local.add(err, panicOnTerminal)
 }
 
+// err joins local errors with the current errors from all parent streams.
 func (s *mergedStreamState) err() error {
 	if s == nil {
 		return nil
 	}
 
-	errs := make([]error, 0, 1+len(s.parents))
+	errorsList := make([]error, 0, 1+len(s.parents))
 	if err := s.local.err(); err != nil {
-		errs = append(errs, err)
+		errorsList = append(errorsList, err)
 	}
 	for _, parent := range s.parents {
 		if parent == nil {
 			continue
 		}
 		if err := parent.err(); err != nil {
-			errs = append(errs, err)
+			errorsList = append(errorsList, err)
 		}
 	}
 
-	return errors.Join(errs...)
+	return errors.Join(errorsList...)
 }
 
+// shouldPanic reports whether either the local stream or any parent stream has
+// requested panic-on-terminal behavior.
 func (s *mergedStreamState) shouldPanic() bool {
 	if s == nil {
 		return false
@@ -101,6 +118,8 @@ func (s *mergedStreamState) shouldPanic() bool {
 	return false
 }
 
+// operationController owns the cancellation scope and worker error strategy for
+// one concurrent stream operation.
 type operationController struct {
 	ctx      context.Context
 	cancel   context.CancelCauseFunc
@@ -108,6 +127,8 @@ type operationController struct {
 	strategy ErrorStrategy
 }
 
+// newOperationController derives a worker context from parent and validates the
+// requested error strategy.
 func newOperationController(parent context.Context, state streamStateHandle, strategy ErrorStrategy) *operationController {
 	if parent == nil {
 		parent = context.Background()
@@ -123,6 +144,7 @@ func newOperationController(parent context.Context, state streamStateHandle, str
 	}
 }
 
+// report applies the configured strategy to one worker failure.
 func (c *operationController) report(err error) {
 	if err == nil {
 		return

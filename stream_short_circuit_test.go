@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// These tests distinguish terminals that wait for delayed fail-fast errors from Err variants that return early.
 func TestShortCircuitTerminalsWaitForLateFailFastError(t *testing.T) {
 	errBoom := errors.New("boom")
 
@@ -216,6 +217,7 @@ func TestRingWrapKeepsIndexBoundedAndOrderStable(t *testing.T) {
 	}
 }
 
+// newLateFailFastStream emits one successful item immediately and delays the fail-fast error until release is closed.
 func newLateFailFastStream(err error) (Stream[int], chan struct{}) {
 	release := make(chan struct{})
 	firstDone := make(chan struct{})
@@ -234,6 +236,7 @@ func newLateFailFastStream(err error) (Stream[int], chan struct{}) {
 	return stream, release
 }
 
+// waitStreamErr polls the shared stream state until want is recorded or the test times out.
 func waitStreamErr(t *testing.T, stream Stream[int], want error, name string) {
 	t.Helper()
 

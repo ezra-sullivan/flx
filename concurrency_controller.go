@@ -8,8 +8,12 @@ import (
 	"sync"
 )
 
+// ErrWorkerLimitReduced reports that a worker was canceled because a forced
+// dynamic controller shrank below the number of active workers.
 var ErrWorkerLimitReduced = errors.New("flx: worker canceled because concurrency limit was reduced")
 
+// ConcurrencyController coordinates resizable worker limits for dynamic stream
+// operations. It is safe for concurrent use.
 type ConcurrencyController struct {
 	sem *DynamicSemaphore
 
@@ -18,6 +22,8 @@ type ConcurrencyController struct {
 	cancels map[int]context.CancelCauseFunc
 }
 
+// NewConcurrencyController returns a controller whose worker limit starts at
+// workers, clamped to at least one slot.
 func NewConcurrencyController(workers int) *ConcurrencyController {
 	return &ConcurrencyController{
 		sem:     NewDynamicSemaphore(workers),
@@ -25,20 +31,27 @@ func NewConcurrencyController(workers int) *ConcurrencyController {
 	}
 }
 
+// SetWorkers updates the target worker count. When the limit shrinks, the
+// newest registered interruptible workers are canceled until the active count
+// fits within the new limit.
 func (c *ConcurrencyController) SetWorkers(n int) {
 	n = max(n, minWorkers)
 	c.sem.Resize(n)
 	c.cancelExcess(n)
 }
 
+// Workers returns the configured worker limit.
 func (c *ConcurrencyController) Workers() int {
 	return c.sem.Cap()
 }
 
+// ActiveWorkers returns the number of workers currently holding semaphore slots.
 func (c *ConcurrencyController) ActiveWorkers() int {
 	return c.sem.Current()
 }
 
+// registerCancel records one interruptible worker cancel function and returns a
+// monotonically increasing registration ID.
 func (c *ConcurrencyController) registerCancel(cancel context.CancelCauseFunc) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -49,6 +62,7 @@ func (c *ConcurrencyController) registerCancel(cancel context.CancelCauseFunc) i
 	return id
 }
 
+// unregisterCancel removes a worker cancel function after that worker exits.
 func (c *ConcurrencyController) unregisterCancel(id int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -56,6 +70,8 @@ func (c *ConcurrencyController) unregisterCancel(id int) {
 	delete(c.cancels, id)
 }
 
+// cancelExcess cancels the newest registered workers until the interruptible
+// worker count no longer exceeds newLimit.
 func (c *ConcurrencyController) cancelExcess(newLimit int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

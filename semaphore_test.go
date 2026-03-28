@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// These tests exercise DynamicSemaphore acquisition, cancellation, resize, and leak resistance.
 func TestDynamicSemaphoreBasicAcquireRelease(t *testing.T) {
 	sem := NewDynamicSemaphore(3)
 	sem.Acquire()

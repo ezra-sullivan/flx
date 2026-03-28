@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// These tests verify that short-circuit and partial consumers still drain upstream producers.
 func TestShortCircuitOperatorsDrainUpstreamProducer(t *testing.T) {
 	tests := []struct {
 		name string
@@ -151,6 +152,7 @@ func TestReduceEarlyReturnStillDrainsUpstreamProducer(t *testing.T) {
 	waitProducerDone(t, producerDone, "Reduce")
 }
 
+// testProducerStream builds a producer that finishes only after downstream drains all emitted items.
 func testProducerStream(total int) (Stream[int], <-chan struct{}) {
 	done := make(chan struct{})
 	stream := From(func(source chan<- int) {
@@ -162,6 +164,7 @@ func testProducerStream(total int) (Stream[int], <-chan struct{}) {
 	return stream, done
 }
 
+// waitProducerDone fails the test when an upstream producer remains blocked after the consumer returned.
 func waitProducerDone(t *testing.T, done <-chan struct{}, name string) {
 	t.Helper()
 

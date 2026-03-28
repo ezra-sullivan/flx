@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// These tests verify how ConcurrencyController cancels the newest interruptible workers when shrinking.
 func TestConcurrencyControllerCancelExcessSparseIDsNewestFirst(t *testing.T) {
 	ctrl := NewConcurrencyController(4)
 	var canceled []int

@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// These tests cover count- and time-window transforms, including cancellation and flush behavior.
 func TestDistinctByCountResetsPerWindow(t *testing.T) {
 	got := DistinctByCount(Values("a", "b", "a", "c", "a", "b"), 3, func(v string) string {
 		return v
@@ -186,6 +187,7 @@ func TestTimeWindowPanicsOnInvalidDuration(t *testing.T) {
 	})
 }
 
+// collectAsync collects a stream on a goroutine so time-based tests can coordinate with it asynchronously.
 func collectAsync[T any](s Stream[T]) <-chan []T {
 	resultCh := make(chan []T, 1)
 	go func() {
@@ -194,6 +196,7 @@ func collectAsync[T any](s Stream[T]) <-chan []T {
 	return resultCh
 }
 
+// waitValue returns the next value from ch or fails the test on timeout.
 func waitValue[T any](t *testing.T, ch <-chan T, name string) T {
 	t.Helper()
 
@@ -208,6 +211,7 @@ func waitValue[T any](t *testing.T, ch <-chan T, name string) T {
 	return zero
 }
 
+// waitDone waits for done to close or fails the test on timeout.
 func waitDone(t *testing.T, done <-chan struct{}, name string) {
 	t.Helper()
 
@@ -218,6 +222,7 @@ func waitDone(t *testing.T, done <-chan struct{}, name string) {
 	}
 }
 
+// groupsEqual compares grouped results while preserving key order and item order.
 func groupsEqual[K comparable, T comparable](got, want []Group[K, T]) bool {
 	return slices.EqualFunc(got, want, func(a, b Group[K, T]) bool {
 		return a.Key == b.Key && slices.Equal(a.Items, b.Items)

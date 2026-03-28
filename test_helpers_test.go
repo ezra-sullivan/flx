@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+// test_helpers_test.go contains helper assertions shared by package tests.
+// assertPanicIs verifies that fn panics with an error matching target.
 func assertPanicIs(t *testing.T, target error, fn func()) {
 	t.Helper()
 
