@@ -140,18 +140,14 @@ func ListRemoteImages(
 	})
 }
 
-// DownloadImages fetches the bytes for each listed image and converts network
-// or retry exhaustion failures into item-scoped errors. That design keeps later
-// stages running for unaffected items instead of failing the whole pipeline on
-// the first bad download.
-func DownloadImages(
-	ctx context.Context,
-	in flx.Stream[RemoteImage],
+// downloadImageStage returns the mapper used by the staged pipeline's download
+// step. Network failures stay item-scoped so later stages can keep working on
+// unaffected images.
+func downloadImageStage(
 	sourceHTTPClient *http.Client,
 	cfg PipelineConfig,
-	opts ...flx.Option,
-) flx.Stream[ImageResult[[]byte]] {
-	return flx.MapContext(ctx, in, func(ctx context.Context, image RemoteImage) ImageResult[[]byte] {
+) func(context.Context, RemoteImage) ImageResult[[]byte] {
+	return func(ctx context.Context, image RemoteImage) ImageResult[[]byte] {
 		imageBytes, err := downloadImageWithRetry(ctx, sourceHTTPClient, image.SourceURL, cfg)
 		if err != nil {
 			return ImageResult[[]byte]{
@@ -166,19 +162,16 @@ func DownloadImages(
 			SourceURL: image.SourceURL,
 			Value:     imageBytes,
 		}
-	}, opts...)
+	}
 }
 
-// TransformImages applies one transform to every successful item while passing
-// failed items through unchanged. That contract lets multiple transform stages
-// compose cleanly without each stage needing to repeat failure fan-out logic.
-func TransformImages(
-	ctx context.Context,
-	in flx.Stream[ImageResult[[]byte]],
+// transformImageStage returns the mapper used by transform steps. Failed items
+// pass through unchanged so multiple stages can compose without repeating the
+// same fan-out logic.
+func transformImageStage(
 	transform ImageTransformer,
-	opts ...flx.Option,
-) flx.Stream[ImageResult[[]byte]] {
-	return flx.MapContext(ctx, in, func(ctx context.Context, image ImageResult[[]byte]) ImageResult[[]byte] {
+) func(context.Context, ImageResult[[]byte]) ImageResult[[]byte] {
+	return func(ctx context.Context, image ImageResult[[]byte]) ImageResult[[]byte] {
 		if image.Err != nil {
 			return image
 		}
@@ -197,25 +190,23 @@ func TransformImages(
 			SourceURL: image.SourceURL,
 			Value:     nextBytes,
 		}
-	}, opts...)
+	}
 }
 
-// SaveLocalImages writes successful items into a stage-specific directory while
-// returning the original payload so later stages can continue processing. Local
-// file I/O therefore follows the same worker, cancellation, and item-level
-// error model as every other stage in the example.
-func SaveLocalImages(
-	ctx context.Context,
-	in flx.Stream[ImageResult[[]byte]],
+// saveLocalImageStage returns the mapper used by local persistence steps. When
+// baseDir is blank it becomes an identity stage so the pipeline shape does not
+// need conditional rewrites.
+func saveLocalImageStage(
 	baseDir string,
 	stage string,
-	opts ...flx.Option,
-) flx.Stream[ImageResult[[]byte]] {
+) func(context.Context, ImageResult[[]byte]) ImageResult[[]byte] {
 	if strings.TrimSpace(baseDir) == "" {
-		return in
+		return func(_ context.Context, image ImageResult[[]byte]) ImageResult[[]byte] {
+			return image
+		}
 	}
 
-	return flx.MapContext(ctx, in, func(ctx context.Context, image ImageResult[[]byte]) ImageResult[[]byte] {
+	return func(ctx context.Context, image ImageResult[[]byte]) ImageResult[[]byte] {
 		if image.Err != nil {
 			return image
 		}
@@ -229,20 +220,17 @@ func SaveLocalImages(
 		}
 
 		return image
-	}, opts...)
+	}
 }
 
-// UploadImages posts the final image bytes to an optional target endpoint and
-// converts upload failures into item-scoped errors. Successful uploads keep the
-// returned remote URL in Value so the sink can log where each image landed.
-func UploadImages(
-	ctx context.Context,
-	in flx.Stream[ImageResult[[]byte]],
+// uploadImageStage returns the mapper used by the optional upload step.
+// Successful uploads keep the returned remote URL in Value so the sink can log
+// where each image landed.
+func uploadImageStage(
 	targetHTTPClient *http.Client,
 	uploadEndpoint string,
-	opts ...flx.Option,
-) flx.Stream[ImageResult[string]] {
-	return flx.MapContext(ctx, in, func(ctx context.Context, image ImageResult[[]byte]) ImageResult[string] {
+) func(context.Context, ImageResult[[]byte]) ImageResult[string] {
+	return func(ctx context.Context, image ImageResult[[]byte]) ImageResult[string] {
 		if image.Err != nil {
 			return ImageResult[string]{
 				ImageID:   image.ImageID,
@@ -265,7 +253,7 @@ func UploadImages(
 			SourceURL: image.SourceURL,
 			Value:     postedURL,
 		}
-	}, opts...)
+	}
 }
 
 // consumeProcessedImages drains the locally processed stream, logs the outcome

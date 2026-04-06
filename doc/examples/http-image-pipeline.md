@@ -4,7 +4,7 @@
 
 相关文件：
 - 入口：[examples/http_image_pipeline/main.go](../../examples/http_image_pipeline/main.go)
-- stage 函数组合版：[examples/http_image_pipeline/stage_pipeline.go](../../examples/http_image_pipeline/stage_pipeline.go)
+- `Stage` 组合版：[examples/http_image_pipeline/stage_pipeline.go](../../examples/http_image_pipeline/stage_pipeline.go)
 - 原生 `flx` API 版：[examples/http_image_pipeline/native_pipeline.go](../../examples/http_image_pipeline/native_pipeline.go)
 - 共享类型与 helper：[examples/http_image_pipeline/shared.go](../../examples/http_image_pipeline/shared.go)
 
@@ -31,11 +31,11 @@ go run ./examples/http_image_pipeline
 
 ## 本地输出
 
-示例默认会把图片写到：`examples/http_image_pipeline/output/`
+示例默认会把图片写到：`examples/http_image_pipeline/.output/`
 
 具体目录：
-- 原图：`examples/http_image_pipeline/output/original/`
-- 处理图：`examples/http_image_pipeline/output/processed/`
+- 原图：`examples/http_image_pipeline/.output/original/`
+- 处理图：`examples/http_image_pipeline/.output/processed/`
 
 这样跑完以后，你可以直接打开同一个图片 ID 的两份文件对比：
 - `original/<image-id>.jpg`：下载下来的大图
@@ -49,25 +49,26 @@ go run ./examples/http_image_pipeline
 
 ## 两种写法
 
-### 1. stage 函数组合版
+### 1. `Stage` 组合版
 
 见 [examples/http_image_pipeline/stage_pipeline.go](../../examples/http_image_pipeline/stage_pipeline.go)。
 
-这一版更接近业务流水线，代码顺序基本就是：
+这一版直接把 `flx.Stage(...)` 摆在跨类型边界上，再用 `Stream[T].Through(...)` 串起中间保持同类型的 stage，代码顺序基本就是：
 
 ```go
 listedImages := ListRemoteImages(ctx, sourceHTTPClient, cfg)
 
-images := DownloadImages(ctx, listedImages, sourceHTTPClient, flx.WithWorkers(cfg.DownloadWorkers))
-images = SaveLocalImages(ctx, images, cfg.LocalOutputDir, "original", flx.WithWorkers(2))
-images = TransformImages(ctx, images, ResizeTo(cfg.ResizeWidth, cfg.ResizeHeight), flx.WithForcedDynamicWorkers(resizeController))
-images = TransformImages(ctx, images, AddWatermarkText(cfg.WatermarkText), flx.WithWorkers(cfg.WatermarkWorkers))
-images = SaveLocalImages(ctx, images, cfg.LocalOutputDir, "processed", flx.WithWorkers(2))
+images := flx.Stage(ctx, listedImages, downloadImageStage(sourceHTTPClient, cfg), flx.WithWorkers(cfg.DownloadWorkers)).
+	Through(ctx, saveLocalImageStage(cfg.LocalOutputDir, "original"), flx.WithWorkers(2)).
+	Through(ctx, transformImageStage(ResizeTo(cfg.ResizeWidth, cfg.ResizeHeight)), flx.WithForcedDynamicWorkers(resizeController)).
+	Through(ctx, transformImageStage(AddWatermarkText(cfg.WatermarkText)), flx.WithWorkers(cfg.WatermarkWorkers)).
+	Through(ctx, saveLocalImageStage(cfg.LocalOutputDir, "processed"), flx.WithWorkers(2))
 ```
 
 适合：
 - 业务 stage 会经常增删调整
-- 想把 `DownloadImages`、`TransformImages`、`UploadImages` 这些步骤复用到别的任务
+- 想让 pipeline 调用点直接体现“这是一个 stage”，而不是一段底层变换拼装
+- 想把每个 stage 的业务逻辑收敛成小 mapper helper，再把并发策略留在调用点
 - 想让每个 stage 的并发策略在调用点上清晰可见
 
 推荐变量风格：
@@ -81,7 +82,7 @@ images = SaveLocalImages(ctx, images, cfg.LocalOutputDir, "processed", flx.WithW
 
 见 [examples/http_image_pipeline/native_pipeline.go](../../examples/http_image_pipeline/native_pipeline.go)。
 
-这一版直接把 `flx.From(...)`、`flx.MapContext(...)` 串起来，适合看最原始的流式拼装方式。优点是每一段行为都展开得很直接，排查问题时也更容易定位到底是哪一个 `MapContext(...)` 在做什么；代价是 stage 变多以后，可读性会比 stage 函数组合版差一些。
+这一版直接把 `flx.From(...)`、`flx.MapContext(...)` 串起来，适合看最原始的流式拼装方式。优点是每一段行为都展开得很直接，排查问题时也更容易定位到底是哪一个 `MapContext(...)` 在做什么；代价是 stage 变多以后，可读性会比 `Stage` 组合版差一些。
 
 ## 上传怎么打开
 
@@ -92,6 +93,6 @@ UploadEndpoint: "https://your-upload-service.example/upload",
 ```
 
 填上以后：
-- `RunStagePipeline(...)` 会在本地保存处理图之后继续调用 `UploadImages(...)`
+- `RunStagePipeline(...)` 会在本地保存处理图之后继续执行最后一段 `flx.Stage(...)` 上传
 - `RunNativePipeline(...)` 会继续执行最后一段上传 `MapContext(...)`
 

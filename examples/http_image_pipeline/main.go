@@ -62,7 +62,7 @@ func main() {
 	}
 
 	// Uncomment this path to compare the more explicit inline-pipeline version
-	// against the helper-oriented stage pipeline above.
+	// against the Stage-oriented pipeline above.
 	// if err := RunNativePipeline(ctx, sourceHTTPClient, targetHTTPClient, cfg, resizeController); err != nil {
 	// 	log.Fatal(err)
 	// }

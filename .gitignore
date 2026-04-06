@@ -3,8 +3,9 @@
 .claude/
 AGENTS.md
 
-# local private docs
+# local private docs and tools
 .local-doc/
+.local-tools/
 
 
 

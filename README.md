@@ -70,13 +70,13 @@ go run ./examples/http_image_pipeline
 
 这个示例会：
 - 从 `https://picsum.photos/v2/list` 分页拉取图片
-- 下载大图并保存到 `examples/http_image_pipeline/output/original/`（默认 5 张）
-- 把大图缩成小图并保存到 `examples/http_image_pipeline/output/processed/`
+- 下载大图并保存到 `examples/http_image_pipeline/.output/original/`（默认 5 张）
+- 把大图缩成小图并保存到 `examples/http_image_pipeline/.output/processed/`
 - 下载阶段会用 `flx.DoWithRetryCtx(...)` 自动重试，默认 3 次
 - 默认只做下载和处理，不做上传；如需上传，在 `examples/http_image_pipeline/main.go` 里填 `UploadEndpoint`
 
 两种实现都在仓库里：
-- stage 函数组合版：`examples/http_image_pipeline/stage_pipeline.go`
+- `Stage` 组合版：`examples/http_image_pipeline/stage_pipeline.go`
 - 原生 `flx` API 版：`examples/http_image_pipeline/native_pipeline.go`
 
 完整说明见 [doc/examples/http-image-pipeline.md](./doc/examples/http-image-pipeline.md)。
@@ -88,6 +88,9 @@ go run ./examples/http_image_pipeline
 
 - 同类型操作：`Filter`、`Sort`、`Head`、`Skip`
 - 跨类型操作：`flx.Map`、`flx.FlatMap`、`flx.MapContext`
+- stage 语义封装：`flx.Stage`、`flx.StageErr`、`flx.FlatStage`、`flx.FlatStageErr`、`flx.Tap`
+
+如果一段 pipeline 在若干 stage 之间保持同一个 `Stream[T]` 类型，可以继续用方法链把这段写得更像“流经多个 stage”，例如 `flx.Stage(...).Through(...).Through(...)`。
 
 ```go
 s := flx.Values(1, 2, 3).Filter(func(v int) bool { return v > 1 })
@@ -106,6 +109,7 @@ out := flx.Map(s, func(v int) string { return fmt.Sprintf("v=%d", v) })
 - `Map` / `MapErr`
 - `FlatMap` / `FlatMapErr`
 - `MapContext` / `FlatMapContext`
+- `Stage` / `StageErr` / `FlatStage` / `FlatStageErr` / `Tap`
 - `DistinctBy` / `GroupBy` / `Chunk`
 - `DistinctByCount` / `GroupByCount`
 - `DistinctByWindow` / `GroupByWindow`

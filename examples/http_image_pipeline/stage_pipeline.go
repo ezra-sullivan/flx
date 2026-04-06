@@ -8,9 +8,9 @@ import (
 )
 
 // RunStagePipeline assembles the same demo as RunNativePipeline, but expresses
-// it as a sequence of named business stages. This version is easier to read
+// it as a sequence of explicit flx.Stage calls. This version is easier to read
 // when the goal is to understand pipeline shape and stage boundaries rather
-// than the mechanics of each flx combinator.
+// than the mechanics of each lower-level flx combinator.
 func RunStagePipeline(
 	ctx context.Context,
 	sourceHTTPClient *http.Client,
@@ -18,49 +18,35 @@ func RunStagePipeline(
 	cfg PipelineConfig,
 	resizeController *flx.ConcurrencyController,
 ) error {
-	// This version reads like business pipeline code: each helper captures one
-	// stage contract, which keeps the orchestration focused on stage order.
+	// This version keeps the orchestration focused on stage order. Small mapper
+	// helpers capture each stage contract while the pipeline still shows the
+	// Stage API directly at the call site.
 	listedImages := ListRemoteImages(ctx, sourceHTTPClient, cfg)
 
-	images := DownloadImages(
+	images := flx.Stage(
 		ctx,
 		listedImages,
-		sourceHTTPClient,
-		cfg,
+		downloadImageStage(sourceHTTPClient, cfg),
 		flx.WithWorkers(cfg.DownloadWorkers),
-	)
-
-	// Save downloaded originals so the example leaves behind artifacts that make
-	// later transforms easy to inspect visually.
-	images = SaveLocalImages(
+	).Through(
 		ctx,
-		images,
-		cfg.LocalOutputDir,
-		"original",
+		// Save downloaded originals so the example leaves behind artifacts that
+		// make later transforms easy to inspect visually.
+		saveLocalImageStage(cfg.LocalOutputDir, "original"),
 		flx.WithWorkers(2),
-	)
-
-	images = TransformImages(
+	).Through(
 		ctx,
-		images,
-		ResizeTo(cfg.ResizeWidth, cfg.ResizeHeight),
+		transformImageStage(ResizeTo(cfg.ResizeWidth, cfg.ResizeHeight)),
 		flx.WithForcedDynamicWorkers(resizeController),
-	)
-
-	images = TransformImages(
+	).Through(
 		ctx,
-		images,
-		AddWatermarkText(cfg.WatermarkText),
+		transformImageStage(AddWatermarkText(cfg.WatermarkText)),
 		flx.WithWorkers(cfg.WatermarkWorkers),
-	)
-
-	// Save processed files after all local transforms finish so the output
-	// directory contains both untouched originals and the final result.
-	images = SaveLocalImages(
+	).Through(
 		ctx,
-		images,
-		cfg.LocalOutputDir,
-		"processed",
+		// Save processed files after all local transforms finish so the output
+		// directory contains both untouched originals and the final result.
+		saveLocalImageStage(cfg.LocalOutputDir, "processed"),
 		flx.WithWorkers(2),
 	)
 
@@ -70,11 +56,10 @@ func RunStagePipeline(
 		return consumeProcessedImages(images)
 	}
 
-	results := UploadImages(
+	results := flx.Stage(
 		ctx,
 		images,
-		targetHTTPClient,
-		cfg.UploadEndpoint,
+		uploadImageStage(targetHTTPClient, cfg.UploadEndpoint),
 		flx.WithWorkers(cfg.UploadWorkers),
 	)
 
