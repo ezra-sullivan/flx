@@ -254,6 +254,7 @@ items, err := out.CollectErr()
 - 详细用法：[doc/guide.md](./doc/guide.md)
 - 实战示例：[doc/examples/http-image-pipeline.md](./doc/examples/http-image-pipeline.md)
 - 架构设计：[doc/architecture.md](./doc/architecture.md)
+- 仓库工作流：[doc/git-workflow.md](./doc/git-workflow.md)
 
 
 
