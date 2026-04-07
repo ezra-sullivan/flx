@@ -31,29 +31,25 @@ flx/
 │   ├── architecture.md
 │   ├── quickstart.md
 │   └── guide.md
-├── stream.go
-├── stream_terminal.go
-├── transform.go
-├── transform_runtime.go
-├── options.go
-├── error_strategy.go
-├── operation_state.go
-├── concurrency_controller.go
-├── concurrency_semaphore.go
-├── parallel.go
-├── retry.go
-├── timeout.go
-├── batch_error.go
-├── ring.go
-└── threading.go
+├── stream_api.go
+├── transform_api.go
+├── control_api.go
+├── runtime_api.go
+└── internal/
+    ├── collections/
+    ├── config/
+    ├── control/
+    ├── runtime/
+    ├── state/
+    └── streaming/
 ```
 
 原则：
 
 - 对外只暴露一个包：`flx`
-- 支撑结构默认放在根包的未导出类型里
+- 根包优先保持 thin facade，运行时与状态实现下沉到 `internal/*`
 - 不再为“复刻 go-zero 内部目录”保留公开子包
-- 文件按“公共 API / 运行时实现 / 支撑结构”分层，但不拆公开子包
+- 根包文件按“公共 API 入口 / 少量独立工具”组织，复杂实现归内部 owner 包
 
 ## 3. 核心类型
 
@@ -61,38 +57,37 @@ flx/
 
 ```go
 type Stream[T any] struct {
-    source <-chan T
-    state  streamStateHandle
+    inner streaming.Stream[T]
 }
 ```
 
 职责：
 
-- 保存当前阶段的 source channel
-- 通过 `streamStateHandle` 共享整条链路的错误状态
-- 承载同类型方法和终结操作
+- 作为根包公开 facade，承载稳定的链式 API
+- 保持公开类型语义，例如 `Stream` 可比较
+- 将 source、错误状态、运行时行为委托给 `internal/streaming`
 
-### 3.2 `streamStateHandle`
+### 3.2 `internal/state.Handle`
 
 ```go
-type streamStateHandle interface {
-    add(err error, panicOnTerminal bool)
-    err() error
-    shouldPanic() bool
+type Handle interface {
+    Add(err error, panicOnTerminal bool)
+    Err() error
+    ShouldPanic() bool
 }
 ```
 
 职责：
 
 - 抽象单流状态与组合流状态
-- 让 `Stream[T]` 不需要区分普通状态和合并状态
+- 由 `internal/streaming` 持有并在组合操作中传播
 - 为 `Concat` 等组合操作保留对上游状态的实时观察
 
-### 3.3 `streamState`
+### 3.3 `internal/state.streamState`
 
 ```go
 type streamState struct {
-    errs            batchError
+    errs            BatchError
     panicOnTerminal atomic.Bool
 }
 ```
@@ -103,12 +98,12 @@ type streamState struct {
 - 记录 fail-fast 是否需要在终结操作触发 panic
 - 作为单条流的本地错误状态容器
 
-### 3.4 `mergedStreamState`
+### 3.4 `internal/state.mergedStreamState`
 
 ```go
 type mergedStreamState struct {
     local   *streamState
-    parents []streamStateHandle
+    parents []Handle
 }
 ```
 
@@ -154,13 +149,13 @@ type DynamicSemaphore struct {
 
 ## 3.7 文件职责
 
-- `stream.go`：`Stream[T]`、构造函数、同类型中间操作
-- `stream_terminal.go`：终结操作与查询 API
-- `transform.go`：公开的跨类型变换 API
-- `transform_runtime.go`：变换执行引擎、worker 调度、取消与 drain 逻辑
-- `operation_state.go`：错误状态聚合与操作级控制器
-- `concurrency_controller.go` / `concurrency_semaphore.go`：动态并发控制
-- `batch_error.go`、`ring.go`、`threading.go`：未导出的底层支撑结构
+- `stream_api.go`：`Stream[T]` facade、构造函数、同类型操作、终结操作
+- `transform_api.go`：公开的跨类型变换 API、stage 风格 API、链式 `Through` / `Tap`
+- `control_api.go`：动态并发控制、`Option`、错误策略、兼容别名
+- `runtime_api.go`：`Parallel`、`Retry`、`Timeout` 等独立工具 API
+- `internal/streaming`：流运行时与变换执行
+- `internal/state`：错误状态与批量错误容器
+- `internal/runtime`：goroutine 安全执行、context 归一化、walker runtime
 
 ## 4. API 设计
 
