@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/color"
-	stdDraw "image/draw"
 	"image/jpeg"
 	"io"
 	"log"
@@ -579,9 +577,9 @@ func ResizeTo(width int, height int) ImageTransformer {
 }
 
 // AddWatermarkText returns a lightweight transformer that overlays a visible
-// footer marker. The implementation is intentionally simple: the example only
-// needs to show that a second transform stage ran, not implement a full text
-// rendering pipeline.
+// footer marker plus a tiny built-in bitmap text watermark. The implementation
+// stays self-contained so the example does not need external font assets or
+// image-processing dependencies.
 func AddWatermarkText(text string) ImageTransformer {
 	return func(ctx context.Context, sourceURL string, imageBytes []byte) ([]byte, error) {
 		select {
@@ -648,51 +646,4 @@ func resizeNearest(src image.Image, width int, height int) *image.RGBA {
 	}
 
 	return dst
-}
-
-// addWatermarkMarker draws a translucent footer bar plus accent blocks so the
-// processed image is visibly distinct from the original. The accent color is
-// derived from the watermark inputs, which keeps the marker deterministic for a
-// given item without storing extra state.
-func addWatermarkMarker(src image.Image, text string, sourceURL string) *image.RGBA {
-	bounds := src.Bounds()
-	dst := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
-	stdDraw.Draw(dst, dst.Bounds(), src, bounds.Min, stdDraw.Src)
-
-	barHeight := max(bounds.Dy()/6, 24)
-	barRect := image.Rect(0, bounds.Dy()-barHeight, bounds.Dx(), bounds.Dy())
-	barColor := color.NRGBA{R: 24, G: 24, B: 24, A: 150}
-	stdDraw.Draw(dst, barRect, image.NewUniform(barColor), image.Point{}, stdDraw.Over)
-
-	accent := watermarkAccent(text, sourceURL)
-	blockWidth := max(bounds.Dx()/18, 12)
-	blockGap := max(blockWidth/3, 4)
-	startX := 12
-	topY := bounds.Dy() - barHeight + 8
-	blockHeight := max(barHeight-16, 8)
-
-	for i := 0; i < 6 && startX < bounds.Dx()-blockWidth; i++ {
-		rect := image.Rect(startX, topY, startX+blockWidth, topY+blockHeight)
-		stdDraw.Draw(dst, rect, image.NewUniform(accent), image.Point{}, stdDraw.Over)
-		startX += blockWidth + blockGap
-	}
-
-	return dst
-}
-
-// watermarkAccent derives a repeatable accent color from the watermark text and
-// source URL so the visual marker is deterministic for one item while still
-// varying across different inputs.
-func watermarkAccent(text string, sourceURL string) color.NRGBA {
-	sum := 0
-	for _, b := range []byte(text + sourceURL) {
-		sum += int(b)
-	}
-
-	return color.NRGBA{
-		R: uint8(80 + sum%120),
-		G: uint8(40 + (sum/3)%120),
-		B: uint8(120 + (sum/7)%100),
-		A: 190,
-	}
 }

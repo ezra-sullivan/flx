@@ -7,6 +7,7 @@
 - `Stage` 组合版：[examples/http_image_pipeline/stage_pipeline.go](../../examples/http_image_pipeline/stage_pipeline.go)
 - 原生 `flx` API 版：[examples/http_image_pipeline/native_pipeline.go](../../examples/http_image_pipeline/native_pipeline.go)
 - 共享类型与 helper：[examples/http_image_pipeline/shared.go](../../examples/http_image_pipeline/shared.go)
+- 水印绘制实现：[examples/http_image_pipeline/watermark.go](../../examples/http_image_pipeline/watermark.go)
 
 ## 运行方式
 
@@ -43,9 +44,9 @@ go run ./examples/http_image_pipeline
 
 当前示例里的处理逻辑不是空占位，而是会实际做两件事：
 - 把大图缩成更小的缩略图
-- 在底部叠一条明显的标记带，方便确认处理结果确实变化了
+- 在底部叠半透明标记带和内置位图字体水印文字，方便确认处理结果确实变化了
 
-这些处理函数都在 [examples/http_image_pipeline/shared.go](../../examples/http_image_pipeline/shared.go)。
+这些处理函数分布在 [examples/http_image_pipeline/shared.go](../../examples/http_image_pipeline/shared.go) 和 [examples/http_image_pipeline/watermark.go](../../examples/http_image_pipeline/watermark.go)。
 
 ## 两种写法
 
