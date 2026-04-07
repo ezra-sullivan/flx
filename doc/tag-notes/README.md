@@ -1,20 +1,30 @@
 # Tag Notes
 
-这个目录用于记录需要补充说明、但不属于正式 release 的 Git tag。
+This directory stores supplemental notes for selected Git tags.
+These notes are not formal release notes.
 
-适用场景：
+Use this directory for:
 
-- 内部里程碑 tag
-- 验证性 tag
-- 集成点 tag
-- RC / 实验性 tag
+- internal milestone tags
+- validation tags
+- integration-point tags
+- RC or experiment tags
 
-约定：
+Rules:
 
-- 不是每个 tag 都必须写 note
-- 只有需要解释背景、范围或验证结果时才写
-- 文件名默认使用 tag 名，例如 `v0.1.2.md`
+- not every tag needs a note
+- add a note only when background, scope, or verification needs to be explained
+- note filenames should normally match the tag name, for example `v0.1.2.md`
 
-正式 release 版本说明应写入 `doc/release-notes/`，并在根目录 `CHANGELOG.md` 中保留摘要。
+Formal release notes belong in `doc/release-notes/`.
+Keep the top-level `CHANGELOG.md` focused on summary history.
 
-当前仓库里已有的 `v0.1.0`、`v0.1.1`、`v0.1.2`、`v0.1.3` 都按 tag note 管理，而不是 formal release note。
+## Version Index
+
+- [v0.1.6](./v0.1.6.md)
+- [v0.1.5](./v0.1.5.md)
+- `v0.1.4` - no tag note
+- [v0.1.3](./v0.1.3.md)
+- [v0.1.2](./v0.1.2.md)
+- [v0.1.1](./v0.1.1.md)
+- [v0.1.0](./v0.1.0.md)
