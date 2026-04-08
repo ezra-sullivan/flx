@@ -8,12 +8,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ezra-sullivan/flx/pipeline/control"
 )
 
 func TestStageMapsValues(t *testing.T) {
 	items := Stage(t.Context(), Values(1, 2, 3), func(ctx context.Context, item int) int {
 		return item * 10
-	}, WithWorkers(1)).Collect()
+	}, control.WithWorkers(1)).Collect()
 
 	if !slices.Equal(items, []int{10, 20, 30}) {
 		t.Fatalf("expected mapped values, got %v", items)
@@ -27,13 +29,13 @@ func TestThroughChainsSameTypeStages(t *testing.T) {
 		func(ctx context.Context, item int) int {
 			return item * 10
 		},
-		WithWorkers(1),
+		control.WithWorkers(1),
 	).Through(
 		t.Context(),
 		func(ctx context.Context, item int) int {
 			return item + 1
 		},
-		WithWorkers(1),
+		control.WithWorkers(1),
 	).Collect()
 
 	if !slices.Equal(items, []int{11, 21, 31}) {
@@ -48,8 +50,8 @@ func TestStageErrCollectsWorkerErrors(t *testing.T) {
 		func(ctx context.Context, item string) (int, error) {
 			return strconv.Atoi(item)
 		},
-		WithWorkers(1),
-		WithErrorStrategy(ErrorStrategyCollect),
+		control.WithWorkers(1),
+		control.WithErrorStrategy(control.ErrorStrategyCollect),
 	)
 
 	items, err := out.CollectErr()
@@ -76,8 +78,8 @@ func TestThroughErrCollectsWorkerErrors(t *testing.T) {
 
 			return item * 10, nil
 		},
-		WithWorkers(1),
-		WithErrorStrategy(ErrorStrategyCollect),
+		control.WithWorkers(1),
+		control.WithErrorStrategy(control.ErrorStrategyCollect),
 	)
 
 	items, err := out.CollectErr()
@@ -97,7 +99,7 @@ func TestFlatStageEmitsMultipleValues(t *testing.T) {
 			pipe <- item
 			pipe <- item * 10
 		},
-		WithWorkers(1),
+		control.WithWorkers(1),
 	).Collect()
 
 	if !slices.Equal(items, []int{1, 10, 2, 20}) {
@@ -119,8 +121,8 @@ func TestFlatStageErrCollectsWorkerErrors(t *testing.T) {
 			pipe <- item
 			return nil
 		},
-		WithWorkers(1),
-		WithErrorStrategy(ErrorStrategyCollect),
+		control.WithWorkers(1),
+		control.WithErrorStrategy(control.ErrorStrategyCollect),
 	)
 
 	items, err := out.CollectErr()
@@ -141,7 +143,7 @@ func TestTapMethodPassesThroughItems(t *testing.T) {
 			seen = append(seen, item)
 			return nil
 		},
-		WithWorkers(1),
+		control.WithWorkers(1),
 	).CollectErr()
 
 	if err != nil {
@@ -165,7 +167,7 @@ func TestTapPassesThroughItems(t *testing.T) {
 			seen = append(seen, item)
 			return nil
 		},
-		WithWorkers(1),
+		control.WithWorkers(1),
 	)
 
 	items, err := out.CollectErr()
@@ -195,8 +197,8 @@ func TestTapDropsFailedItemsAndCollectsError(t *testing.T) {
 
 			return nil
 		},
-		WithWorkers(1),
-		WithErrorStrategy(ErrorStrategyCollect),
+		control.WithWorkers(1),
+		control.WithErrorStrategy(control.ErrorStrategyCollect),
 	)
 
 	items, err := out.CollectErr()
@@ -209,6 +211,14 @@ func TestTapDropsFailedItemsAndCollectsError(t *testing.T) {
 	if !errors.Is(err, errBoom) {
 		t.Fatalf("expected error to match %v, got %v", errBoom, err)
 	}
+}
+
+func TestForcedDynamicWorkersRequireContextTransform(t *testing.T) {
+	ctrl := control.NewConcurrencyController(2)
+
+	assertPanicIs(t, control.ErrInterruptibleWorkersRequireContextTransform, func() {
+		_ = Map(Values(1, 2, 3), func(v int) int { return v }, control.WithForcedDynamicWorkers(ctrl))
+	})
 }
 
 // These tests cover context-aware transform behavior around canceled sends.
@@ -244,7 +254,7 @@ func TestMapContextCanceledSendDoesNotEmitValue(t *testing.T) {
 			close(started)
 			<-release
 			return item
-		}, WithWorkers(1))
+		}, control.WithWorkers(1))
 
 		<-started
 		cancel(errStopped)

@@ -312,7 +312,7 @@ context 不再通过 option 传入，而是直接成为 API 参数：
 ctx := context.Background()
 out := flx.MapContext(ctx, in, func(ctx context.Context, v Task) Result {
     return work(ctx, v)
-}, flx.WithForcedDynamicWorkers(ctrl))
+}, control.WithForcedDynamicWorkers(ctrl))
 ```
 
 收益：
@@ -402,9 +402,9 @@ func DoWithTimeoutCtx(fn func(context.Context) error, timeout time.Duration, opt
 | `stream.MapErr(...)` | `flx.MapErr(stream, ...)` |
 | `stream.Walk(...)` | `flx.FlatMap(stream, ...)` |
 | `stream.WalkErr(...)` | `flx.FlatMapErr(stream, ...)` |
-| `stream.WalkCtx(..., fx.WithParentContext(ctx), fx.WithDynamicWorkersCtx(ctrl))` | `flx.FlatMapContext(ctx, stream, ..., flx.WithForcedDynamicWorkers(ctrl))` |
+| `stream.WalkCtx(..., fx.WithParentContext(ctx), fx.WithDynamicWorkersCtx(ctrl))` | `flx.FlatMapContext(ctx, stream, ..., control.WithForcedDynamicWorkers(ctrl))` |
 
-`WithInterruptibleWorkers` 仍保留为兼容别名，但文档和新代码建议优先使用 `WithForcedDynamicWorkers`。
+`control.WithInterruptibleWorkers` 仍保留为兼容别名，但文档和新代码建议优先使用 `control.WithForcedDynamicWorkers`。
 | `stream.Distinct(...)` | `flx.DistinctBy(stream, ...)` |
 | `stream.Group(...)` | `flx.GroupBy(stream, ...)` |
 | `stream.Split(n)` | `flx.Chunk(stream, n)` |

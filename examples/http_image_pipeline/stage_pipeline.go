@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/ezra-sullivan/flx"
+	"github.com/ezra-sullivan/flx/pipeline/control"
 )
 
 // RunStagePipeline assembles the same demo as RunNativePipeline, but expresses
@@ -16,7 +17,7 @@ func RunStagePipeline(
 	sourceHTTPClient *http.Client,
 	targetHTTPClient *http.Client,
 	cfg PipelineConfig,
-	resizeController *flx.ConcurrencyController,
+	resizeController *control.ConcurrencyController,
 ) error {
 	// This version keeps the orchestration focused on stage order. Small mapper
 	// helpers capture each stage contract while the pipeline still shows the
@@ -27,27 +28,27 @@ func RunStagePipeline(
 		ctx,
 		listedImages,
 		downloadImageStage(sourceHTTPClient, cfg),
-		flx.WithWorkers(cfg.DownloadWorkers),
+		control.WithWorkers(cfg.DownloadWorkers),
 	).Through(
 		ctx,
 		// Save downloaded originals so the example leaves behind artifacts that
 		// make later transforms easy to inspect visually.
 		saveLocalImageStage(cfg.LocalOutputDir, "original"),
-		flx.WithWorkers(2),
+		control.WithWorkers(2),
 	).Through(
 		ctx,
 		transformImageStage(ResizeTo(cfg.ResizeWidth, cfg.ResizeHeight)),
-		flx.WithForcedDynamicWorkers(resizeController),
+		control.WithForcedDynamicWorkers(resizeController),
 	).Through(
 		ctx,
 		transformImageStage(AddWatermarkText(cfg.WatermarkText)),
-		flx.WithWorkers(cfg.WatermarkWorkers),
+		control.WithWorkers(cfg.WatermarkWorkers),
 	).Through(
 		ctx,
 		// Save processed files after all local transforms finish so the output
 		// directory contains both untouched originals and the final result.
 		saveLocalImageStage(cfg.LocalOutputDir, "processed"),
-		flx.WithWorkers(2),
+		control.WithWorkers(2),
 	)
 
 	// No upload endpoint configured: stop after local processing and summarize
@@ -60,7 +61,7 @@ func RunStagePipeline(
 		ctx,
 		images,
 		uploadImageStage(targetHTTPClient, cfg.UploadEndpoint),
-		flx.WithWorkers(cfg.UploadWorkers),
+		control.WithWorkers(cfg.UploadWorkers),
 	)
 
 	return consumeUploadedImages(results)

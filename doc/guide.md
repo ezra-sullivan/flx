@@ -448,7 +448,7 @@ out.ForAll(func(ch <-chan int) {
 ```go
 err := flx.Values("a", "b", "c").ParallelErr(func(v string) error {
 	return process(v)
-}, flx.WithWorkers(4))
+}, control.WithWorkers(4))
 ```
 
 ### `Count` / `CountErr`
@@ -558,7 +558,7 @@ err := out.Err()
 固定并发数：
 
 ```go
-out := flx.Map(in, worker, flx.WithWorkers(8))
+out := flx.Map(in, worker, control.WithWorkers(8))
 ```
 
 说明：
@@ -570,7 +570,7 @@ out := flx.Map(in, worker, flx.WithWorkers(8))
 每个元素一个 worker：
 
 ```go
-out := flx.Map(in, worker, flx.WithUnlimitedWorkers())
+out := flx.Map(in, worker, control.WithUnlimitedWorkers())
 ```
 
 适合：
@@ -583,8 +583,8 @@ out := flx.Map(in, worker, flx.WithUnlimitedWorkers())
 优雅动态并发，缩容时不打断已运行 worker：
 
 ```go
-ctrl := flx.NewConcurrencyController(4)
-out := flx.Map(in, worker, flx.WithDynamicWorkers(ctrl))
+ctrl := control.NewConcurrencyController(4)
+out := flx.Map(in, worker, control.WithDynamicWorkers(ctrl))
 ctrl.SetWorkers(8)
 ctrl.SetWorkers(2)
 ```
@@ -594,8 +594,8 @@ ctrl.SetWorkers(2)
 强制动态并发，缩容时取消多余 worker：
 
 ```go
-ctrl := flx.NewConcurrencyController(4)
-out := flx.MapContext(ctx, in, worker, flx.WithForcedDynamicWorkers(ctrl))
+ctrl := control.NewConcurrencyController(4)
+out := flx.MapContext(ctx, in, worker, control.WithForcedDynamicWorkers(ctrl))
 ```
 
 重要约束：
@@ -608,7 +608,7 @@ out := flx.MapContext(ctx, in, worker, flx.WithForcedDynamicWorkers(ctrl))
 兼容别名：
 
 ```go
-out := flx.MapContext(ctx, in, worker, flx.WithInterruptibleWorkers(ctrl))
+out := flx.MapContext(ctx, in, worker, control.WithInterruptibleWorkers(ctrl))
 ```
 
 新代码建议统一改成 `WithForcedDynamicWorkers`。
@@ -631,7 +631,7 @@ worker 返回错误或 panic 时：
 out := flx.MapErr(
 	in,
 	worker,
-	flx.WithErrorStrategy(flx.ErrorStrategyCollect),
+	control.WithErrorStrategy(control.ErrorStrategyCollect),
 )
 ```
 
@@ -643,7 +643,7 @@ out := flx.MapErr(
 out := flx.MapErr(
 	in,
 	worker,
-	flx.WithErrorStrategy(flx.ErrorStrategyLogAndContinue),
+	control.WithErrorStrategy(control.ErrorStrategyLogAndContinue),
 )
 ```
 
@@ -652,7 +652,7 @@ out := flx.MapErr(
 worker 显式返回错误或 panic 都会统一包装为 `WorkerError`：
 
 ```go
-var workerErr *flx.WorkerError
+var workerErr *control.WorkerError
 
 if errors.As(err, &workerErr) {
 	...
@@ -734,7 +734,7 @@ ok := flx.SendContext(ctx, pipe, item)
 强制动态并发下，如果 worker 因缩容被取消，可以判断：
 
 ```go
-if errors.Is(context.Cause(ctx), flx.ErrWorkerLimitReduced) {
+if errors.Is(context.Cause(ctx), control.ErrWorkerLimitReduced) {
 	...
 }
 ```
@@ -757,7 +757,7 @@ flx.Parallel(task1, task2, task3)
 
 ```go
 err := flx.ParallelWithErrorStrategy(
-	flx.ErrorStrategyCollect,
+	control.ErrorStrategyCollect,
 	task1,
 	task2,
 )

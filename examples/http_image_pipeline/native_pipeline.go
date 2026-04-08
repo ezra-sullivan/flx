@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ezra-sullivan/flx"
+	"github.com/ezra-sullivan/flx/pipeline/control"
 )
 
 // RunNativePipeline builds the example directly out of flx primitives instead
@@ -18,7 +19,7 @@ func RunNativePipeline(
 	sourceHTTPClient *http.Client,
 	targetHTTPClient *http.Client,
 	cfg PipelineConfig,
-	resizeController *flx.ConcurrencyController,
+	resizeController *control.ConcurrencyController,
 ) error {
 	// Native version: build the source stage inline with flx.From so the reader
 	// can inspect the exact listing logic without additional indirection.
@@ -93,7 +94,7 @@ func RunNativePipeline(
 				Value:     imageBytes,
 			}
 		},
-		flx.WithWorkers(cfg.DownloadWorkers),
+		control.WithWorkers(cfg.DownloadWorkers),
 	)
 
 	// Stage 2 persists the unmodified originals so the example can leave behind
@@ -116,7 +117,7 @@ func RunNativePipeline(
 
 			return image
 		},
-		flx.WithWorkers(2),
+		control.WithWorkers(2),
 	)
 
 	// Stage 3 resizes images under a dedicated dynamic worker controller. That
@@ -144,7 +145,7 @@ func RunNativePipeline(
 				Value:     nextBytes,
 			}
 		},
-		flx.WithForcedDynamicWorkers(resizeController),
+		control.WithForcedDynamicWorkers(resizeController),
 	)
 
 	// Stage 4 adds a visible marker so the processed output is obviously
@@ -172,7 +173,7 @@ func RunNativePipeline(
 				Value:     nextBytes,
 			}
 		},
-		flx.WithWorkers(cfg.WatermarkWorkers),
+		control.WithWorkers(cfg.WatermarkWorkers),
 	)
 
 	// Stage 5 writes the transformed bytes to disk so the final artifacts can be
@@ -195,7 +196,7 @@ func RunNativePipeline(
 
 			return image
 		},
-		flx.WithWorkers(2),
+		control.WithWorkers(2),
 	)
 
 	// No upload endpoint configured: stop after local processing and let the sink
@@ -237,7 +238,7 @@ func RunNativePipeline(
 				Value:     postedURL,
 			}
 		},
-		flx.WithWorkers(cfg.UploadWorkers),
+		control.WithWorkers(cfg.UploadWorkers),
 	)
 
 	return consumeUploadedImages(results)

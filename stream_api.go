@@ -1,6 +1,9 @@
 package flx
 
-import "github.com/ezra-sullivan/flx/internal/streaming"
+import (
+	"github.com/ezra-sullivan/flx/internal/streaming"
+	"github.com/ezra-sullivan/flx/pipeline/control"
+)
 
 // Stream is a lazy sequence of values backed by a channel plus shared error
 // state that records upstream worker failures.
@@ -58,8 +61,8 @@ func (s Stream[T]) Concat(others ...Stream[T]) Stream[T] {
 }
 
 // Filter keeps only the items for which fn returns true.
-func (s Stream[T]) Filter(fn func(T) bool, opts ...Option) Stream[T] {
-	return wrapStream(s.inner.Filter(fn, unwrapOptions(opts)...))
+func (s Stream[T]) Filter(fn func(T) bool, opts ...control.Option) Stream[T] {
+	return wrapStream(s.inner.Filter(fn, opts...))
 }
 
 // Buffer inserts a channel buffer of size n between s and the returned stream.
@@ -137,14 +140,14 @@ func (s Stream[T]) ForAllErr(fn func(<-chan T)) error {
 
 // Parallel applies fn to each item using the same worker machinery as the
 // transform operators and panics on fail-fast errors.
-func (s Stream[T]) Parallel(fn func(T), opts ...Option) {
-	s.inner.Parallel(fn, unwrapOptions(opts)...)
+func (s Stream[T]) Parallel(fn func(T), opts ...control.Option) {
+	s.inner.Parallel(fn, opts...)
 }
 
 // ParallelErr applies fn to each item using worker options and returns the
 // final error state.
-func (s Stream[T]) ParallelErr(fn func(T) error, opts ...Option) error {
-	return s.inner.ParallelErr(fn, unwrapOptions(opts)...)
+func (s Stream[T]) ParallelErr(fn func(T) error, opts ...control.Option) error {
+	return s.inner.ParallelErr(fn, opts...)
 }
 
 // Count drains the stream and returns the number of items it produced.

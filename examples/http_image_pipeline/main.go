@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ezra-sullivan/flx"
+	"github.com/ezra-sullivan/flx/pipeline/control"
 )
 
 // main wires together a small end-to-end demo that lists remote images,
@@ -23,7 +23,7 @@ func main() {
 	// Resize is the stage that uses forced dynamic workers in this sample. The
 	// controller is injected into that stage so the worker count can change at
 	// runtime without rebuilding the rest of the pipeline.
-	resizeController := flx.NewConcurrencyController(4)
+	resizeController := control.NewConcurrencyController(4)
 
 	// Simulate runtime scaling while the pipeline is still active. This makes the
 	// effect of dynamic worker control obvious in logs and elapsed time.

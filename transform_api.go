@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ezra-sullivan/flx/internal/streaming"
+	"github.com/ezra-sullivan/flx/pipeline/control"
 )
 
 var (
@@ -26,48 +27,48 @@ func SendContext[T any](ctx context.Context, pipe chan<- T, item T) bool {
 }
 
 // Map applies fn to each item in s and emits the mapped values.
-func Map[T, U any](s Stream[T], fn func(T) U, opts ...Option) Stream[U] {
-	return wrapStream(streaming.Map(unwrapStream(s), fn, unwrapOptions(opts)...))
+func Map[T, U any](s Stream[T], fn func(T) U, opts ...control.Option) Stream[U] {
+	return wrapStream(streaming.Map(unwrapStream(s), fn, opts...))
 }
 
 // MapErr applies fn to each item in s and records any returned error in the
 // stream state.
-func MapErr[T, U any](s Stream[T], fn func(T) (U, error), opts ...Option) Stream[U] {
-	return wrapStream(streaming.MapErr(unwrapStream(s), fn, unwrapOptions(opts)...))
+func MapErr[T, U any](s Stream[T], fn func(T) (U, error), opts ...control.Option) Stream[U] {
+	return wrapStream(streaming.MapErr(unwrapStream(s), fn, opts...))
 }
 
 // FlatMap calls fn for each item and lets fn emit zero or more output values.
-func FlatMap[T, U any](s Stream[T], fn func(T, chan<- U), opts ...Option) Stream[U] {
-	return wrapStream(streaming.FlatMap(unwrapStream(s), fn, unwrapOptions(opts)...))
+func FlatMap[T, U any](s Stream[T], fn func(T, chan<- U), opts ...control.Option) Stream[U] {
+	return wrapStream(streaming.FlatMap(unwrapStream(s), fn, opts...))
 }
 
 // FlatMapErr calls fn for each item and records any returned worker error in
 // the stream state.
-func FlatMapErr[T, U any](s Stream[T], fn func(T, chan<- U) error, opts ...Option) Stream[U] {
-	return wrapStream(streaming.FlatMapErr(unwrapStream(s), fn, unwrapOptions(opts)...))
+func FlatMapErr[T, U any](s Stream[T], fn func(T, chan<- U) error, opts ...control.Option) Stream[U] {
+	return wrapStream(streaming.FlatMapErr(unwrapStream(s), fn, opts...))
 }
 
 // MapContext is Map with a caller-provided context passed into each worker.
-func MapContext[T, U any](ctx context.Context, s Stream[T], fn func(context.Context, T) U, opts ...Option) Stream[U] {
-	return wrapStream(streaming.MapContext(requireContext(ctx), unwrapStream(s), fn, unwrapOptions(opts)...))
+func MapContext[T, U any](ctx context.Context, s Stream[T], fn func(context.Context, T) U, opts ...control.Option) Stream[U] {
+	return wrapStream(streaming.MapContext(requireContext(ctx), unwrapStream(s), fn, opts...))
 }
 
 // MapContextErr is MapErr with a caller-provided context passed into each
 // worker.
-func MapContextErr[T, U any](ctx context.Context, s Stream[T], fn func(context.Context, T) (U, error), opts ...Option) Stream[U] {
-	return wrapStream(streaming.MapContextErr(requireContext(ctx), unwrapStream(s), fn, unwrapOptions(opts)...))
+func MapContextErr[T, U any](ctx context.Context, s Stream[T], fn func(context.Context, T) (U, error), opts ...control.Option) Stream[U] {
+	return wrapStream(streaming.MapContextErr(requireContext(ctx), unwrapStream(s), fn, opts...))
 }
 
 // FlatMapContext is FlatMap with a caller-provided context passed into each
 // worker.
-func FlatMapContext[T, U any](ctx context.Context, s Stream[T], fn func(context.Context, T, chan<- U), opts ...Option) Stream[U] {
-	return wrapStream(streaming.FlatMapContext(requireContext(ctx), unwrapStream(s), fn, unwrapOptions(opts)...))
+func FlatMapContext[T, U any](ctx context.Context, s Stream[T], fn func(context.Context, T, chan<- U), opts ...control.Option) Stream[U] {
+	return wrapStream(streaming.FlatMapContext(requireContext(ctx), unwrapStream(s), fn, opts...))
 }
 
 // FlatMapContextErr is FlatMapErr with a caller-provided context passed into
 // each worker.
-func FlatMapContextErr[T, U any](ctx context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, opts ...Option) Stream[U] {
-	return wrapStream(streaming.FlatMapContextErr(requireContext(ctx), unwrapStream(s), fn, unwrapOptions(opts)...))
+func FlatMapContextErr[T, U any](ctx context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, opts ...control.Option) Stream[U] {
+	return wrapStream(streaming.FlatMapContextErr(requireContext(ctx), unwrapStream(s), fn, opts...))
 }
 
 // DistinctBy keeps the first item for each key produced by fn.
@@ -128,9 +129,9 @@ func Stage[I, O any](
 	ctx context.Context,
 	in Stream[I],
 	fn func(context.Context, I) O,
-	opts ...Option,
+	opts ...control.Option,
 ) Stream[O] {
-	return wrapStream(streaming.Stage(requireContext(ctx), unwrapStream(in), fn, unwrapOptions(opts)...))
+	return wrapStream(streaming.Stage(requireContext(ctx), unwrapStream(in), fn, opts...))
 }
 
 // StageErr applies fn to each item in in and records returned worker errors in
@@ -141,9 +142,9 @@ func StageErr[I, O any](
 	ctx context.Context,
 	in Stream[I],
 	fn func(context.Context, I) (O, error),
-	opts ...Option,
+	opts ...control.Option,
 ) Stream[O] {
-	return wrapStream(streaming.StageErr(requireContext(ctx), unwrapStream(in), fn, unwrapOptions(opts)...))
+	return wrapStream(streaming.StageErr(requireContext(ctx), unwrapStream(in), fn, opts...))
 }
 
 // FlatStage applies fn to each item in in and lets fn emit zero or more output
@@ -154,9 +155,9 @@ func FlatStage[I, O any](
 	ctx context.Context,
 	in Stream[I],
 	fn func(context.Context, I, chan<- O),
-	opts ...Option,
+	opts ...control.Option,
 ) Stream[O] {
-	return wrapStream(streaming.FlatStage(requireContext(ctx), unwrapStream(in), fn, unwrapOptions(opts)...))
+	return wrapStream(streaming.FlatStage(requireContext(ctx), unwrapStream(in), fn, opts...))
 }
 
 // FlatStageErr applies fn to each item in in, lets fn emit zero or more output
@@ -166,9 +167,9 @@ func FlatStageErr[I, O any](
 	ctx context.Context,
 	in Stream[I],
 	fn func(context.Context, I, chan<- O) error,
-	opts ...Option,
+	opts ...control.Option,
 ) Stream[O] {
-	return wrapStream(streaming.FlatStageErr(requireContext(ctx), unwrapStream(in), fn, unwrapOptions(opts)...))
+	return wrapStream(streaming.FlatStageErr(requireContext(ctx), unwrapStream(in), fn, opts...))
 }
 
 // Tap runs fn for each item in in and re-emits the original item when fn
@@ -179,9 +180,9 @@ func Tap[T any](
 	ctx context.Context,
 	in Stream[T],
 	fn func(context.Context, T) error,
-	opts ...Option,
+	opts ...control.Option,
 ) Stream[T] {
-	return wrapStream(streaming.Tap(requireContext(ctx), unwrapStream(in), fn, unwrapOptions(opts)...))
+	return wrapStream(streaming.Tap(requireContext(ctx), unwrapStream(in), fn, opts...))
 }
 
 // Through applies fn to each item in s and returns another Stream[T].
@@ -189,9 +190,9 @@ func Tap[T any](
 func (s Stream[T]) Through(
 	ctx context.Context,
 	fn func(context.Context, T) T,
-	opts ...Option,
+	opts ...control.Option,
 ) Stream[T] {
-	return wrapStream(s.inner.Through(requireContext(ctx), fn, unwrapOptions(opts)...))
+	return wrapStream(s.inner.Through(requireContext(ctx), fn, opts...))
 }
 
 // ThroughErr applies fn to each item in s, records returned worker errors in
@@ -200,9 +201,9 @@ func (s Stream[T]) Through(
 func (s Stream[T]) ThroughErr(
 	ctx context.Context,
 	fn func(context.Context, T) (T, error),
-	opts ...Option,
+	opts ...control.Option,
 ) Stream[T] {
-	return wrapStream(s.inner.ThroughErr(requireContext(ctx), fn, unwrapOptions(opts)...))
+	return wrapStream(s.inner.ThroughErr(requireContext(ctx), fn, opts...))
 }
 
 // Tap runs fn for each item in s and re-emits the original item when fn
@@ -210,9 +211,9 @@ func (s Stream[T]) ThroughErr(
 func (s Stream[T]) Tap(
 	ctx context.Context,
 	fn func(context.Context, T) error,
-	opts ...Option,
+	opts ...control.Option,
 ) Stream[T] {
-	return wrapStream(s.inner.Tap(requireContext(ctx), fn, unwrapOptions(opts)...))
+	return wrapStream(s.inner.Tap(requireContext(ctx), fn, opts...))
 }
 
 // validateWindowCount panics when n is less than one.

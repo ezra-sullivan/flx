@@ -11,8 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ezra-sullivan/flx/internal/config"
 	rt "github.com/ezra-sullivan/flx/internal/runtime"
 	"github.com/ezra-sullivan/flx/internal/state"
+	"github.com/ezra-sullivan/flx/pipeline/control"
 )
 
 const defaultRetryTimes = 3
@@ -60,14 +62,14 @@ type retryOptions struct {
 // Parallel runs each function in its own goroutine and panics if the chosen
 // fail-fast strategy records an error.
 func Parallel(fns ...func()) {
-	if err := ParallelWithErrorStrategy(ErrorStrategyFailFast, fns...); err != nil {
+	if err := ParallelWithErrorStrategy(control.ErrorStrategyFailFast, fns...); err != nil {
 		panic(err)
 	}
 }
 
 // ParallelWithErrorStrategy runs each function in its own goroutine and applies
 // strategy to worker panics and returned errors.
-func ParallelWithErrorStrategy(strategy ErrorStrategy, fns ...func()) error {
+func ParallelWithErrorStrategy(strategy control.ErrorStrategy, fns ...func()) error {
 	mustValidateErrorStrategy(strategy)
 
 	streamState := state.NewStream()
@@ -80,11 +82,11 @@ func ParallelWithErrorStrategy(strategy ErrorStrategy, fns ...func()) error {
 		err = wrapWorkerError(err)
 
 		switch strategy {
-		case ErrorStrategyCollect:
+		case control.ErrorStrategyCollect:
 			streamState.Add(err, false)
-		case ErrorStrategyLogAndContinue:
+		case control.ErrorStrategyLogAndContinue:
 			log.Printf("[flx] worker error: %v", err)
-		case ErrorStrategyFailFast:
+		case control.ErrorStrategyFailFast:
 			streamState.Add(err, true)
 			op.Cancel(err)
 		default:
@@ -115,6 +117,20 @@ launch:
 
 	wg.Wait()
 	return streamState.Err()
+}
+
+func wrapWorkerError(err error) error {
+	return control.WrapWorkerError(err)
+}
+
+func validateErrorStrategy(strategy control.ErrorStrategy) error {
+	return config.ValidateErrorStrategy(config.ErrorStrategy(strategy))
+}
+
+func mustValidateErrorStrategy(strategy control.ErrorStrategy) {
+	if err := validateErrorStrategy(strategy); err != nil {
+		panic(err)
+	}
 }
 
 // ParallelErr runs each function in its own goroutine and returns the joined

@@ -21,6 +21,7 @@ Keep the top-level `CHANGELOG.md` focused on summary history.
 
 ## Version Index
 
+- [v0.1.7](./v0.1.7.md)
 - [v0.1.6](./v0.1.6.md)
 - [v0.1.5](./v0.1.5.md)
 - `v0.1.4` - no tag note

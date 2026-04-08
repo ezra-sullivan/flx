@@ -10,11 +10,13 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ezra-sullivan/flx/pipeline/control"
 )
 
 // These tests cover dynamic and interruptible worker behavior for stream transforms.
 func TestFlatMapWithDynamicWorkersRespectsConcurrency(t *testing.T) {
-	ctrl := NewConcurrencyController(4)
+	ctrl := control.NewConcurrencyController(4)
 	var maxConcurrent atomic.Int32
 	var current atomic.Int32
 
@@ -35,7 +37,7 @@ func TestFlatMapWithDynamicWorkersRespectsConcurrency(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		current.Add(-1)
 		pipe <- item
-	}, WithDynamicWorkers(ctrl)).ForEach(func(item int) {
+	}, control.WithDynamicWorkers(ctrl)).ForEach(func(item int) {
 		mu.Lock()
 		result = append(result, item)
 		mu.Unlock()
@@ -50,7 +52,7 @@ func TestFlatMapWithDynamicWorkersRespectsConcurrency(t *testing.T) {
 }
 
 func TestInterruptibleWorkersShrinkCancelsExtraWorkers(t *testing.T) {
-	ctrl := NewConcurrencyController(4)
+	ctrl := control.NewConcurrencyController(4)
 
 	source := make(chan int, 4)
 	for i := range 4 {
@@ -76,7 +78,7 @@ func TestInterruptibleWorkersShrinkCancelsExtraWorkers(t *testing.T) {
 
 			select {
 			case <-ctx.Done():
-				if errors.Is(context.Cause(ctx), ErrWorkerLimitReduced) {
+				if errors.Is(context.Cause(ctx), control.ErrWorkerLimitReduced) {
 					canceledCount.Add(1)
 				}
 				return
@@ -85,7 +87,7 @@ func TestInterruptibleWorkersShrinkCancelsExtraWorkers(t *testing.T) {
 
 			completed.Add(1)
 			pipe <- item
-		}, WithForcedDynamicWorkers(ctrl)).Done()
+		}, control.WithForcedDynamicWorkers(ctrl)).Done()
 		close(done)
 	}()
 
@@ -113,7 +115,7 @@ func TestInterruptibleWorkersShrinkCancelsExtraWorkers(t *testing.T) {
 }
 
 func TestMapContextForcedDynamicWorkersCanceledSendReleasesSlots(t *testing.T) {
-	ctrl := NewConcurrencyController(1)
+	ctrl := control.NewConcurrencyController(1)
 
 	source := make(chan int, 4)
 	for i := range 4 {
@@ -136,7 +138,7 @@ func TestMapContextForcedDynamicWorkersCanceledSendReleasesSlots(t *testing.T) {
 
 		<-release
 		return item
-	}, WithForcedDynamicWorkers(ctrl))
+	}, control.WithForcedDynamicWorkers(ctrl))
 
 	select {
 	case <-firstStarted:
@@ -183,15 +185,15 @@ func TestMapContextForcedDynamicWorkersCanceledSendReleasesSlots(t *testing.T) {
 }
 
 func TestFilterMapReduceWithDynamicWorkers(t *testing.T) {
-	ctrl := NewConcurrencyController(4)
+	ctrl := control.NewConcurrencyController(4)
 
 	filtered := Values(1, 2, 3, 4, 5, 6, 7, 8, 9, 10).Filter(func(item int) bool {
 		return item%2 == 0
-	}, WithDynamicWorkers(ctrl))
+	}, control.WithDynamicWorkers(ctrl))
 
 	mapped := Map(filtered, func(item int) int {
 		return item * 10
-	}, WithDynamicWorkers(ctrl))
+	}, control.WithDynamicWorkers(ctrl))
 
 	result, err := Reduce(mapped, func(pipe <-chan int) (int, error) {
 		var sum int
@@ -591,6 +593,60 @@ func TestShortCircuitTerminalsWaitForLateFailFastError(t *testing.T) {
 	}
 }
 
+func TestShortCircuitTerminalsPanicWhenFailFastErrorAlreadyRecorded(t *testing.T) {
+	errBoom := errors.New("boom")
+
+	newFailedStream := func(items ...int) Stream[int] {
+		source := make(chan int, len(items))
+		for _, item := range items {
+			source <- item
+		}
+		close(source)
+
+		state := newStreamState()
+		state.add(errBoom, true)
+		return streamWithState(source, state)
+	}
+
+	tests := []struct {
+		name string
+		run  func(Stream[int])
+	}{
+		{
+			name: "First",
+			run: func(s Stream[int]) {
+				_, _ = s.First()
+			},
+		},
+		{
+			name: "AllMatch",
+			run: func(s Stream[int]) {
+				_ = s.AllMatch(func(v int) bool { return v > 0 })
+			},
+		},
+		{
+			name: "AnyMatch",
+			run: func(s Stream[int]) {
+				_ = s.AnyMatch(func(v int) bool { return v == 1 })
+			},
+		},
+		{
+			name: "NoneMatch",
+			run: func(s Stream[int]) {
+				_ = s.NoneMatch(func(v int) bool { return v == 1 })
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertPanicIs(t, errBoom, func() {
+				tt.run(newFailedStream(1))
+			})
+		})
+	}
+}
+
 func TestHeadCollectErrWaitsForLateFailFastError(t *testing.T) {
 	errBoom := errors.New("boom")
 	stream, release := newLateFailFastStream(errBoom)
@@ -735,7 +791,7 @@ func newLateFailFastStream(err error) (Stream[int], chan struct{}) {
 		<-firstDone
 		<-release
 		return 0, err
-	}, WithWorkers(2))
+	}, control.WithWorkers(2))
 
 	return stream, release
 }

@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ezra-sullivan/flx/pipeline/control"
 )
 
 // These tests cover retry validation, cancellation, timeout, and panic conversion behavior.
@@ -104,6 +106,30 @@ func TestDoWithRetryReturnsPanicAsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "retry boom") {
 		t.Fatalf("expected panic error to mention retry boom, got %v", err)
 	}
+}
+
+func TestParallelErrCollectsPanicAndError(t *testing.T) {
+	errBoom := errors.New("boom")
+
+	err := ParallelErr(
+		func() error { return errBoom },
+		func() error {
+			panic("parallel panic")
+		},
+	)
+
+	if !errors.Is(err, errBoom) {
+		t.Fatalf("expected aggregated error to contain boom, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "parallel panic") {
+		t.Fatalf("expected aggregated error to contain panic text, got %v", err)
+	}
+}
+
+func TestParallelWithErrorStrategyPanicsOnInvalidStrategy(t *testing.T) {
+	assertPanicIs(t, control.ErrInvalidErrorStrategy, func() {
+		_ = ParallelWithErrorStrategy(control.ErrorStrategy(100), func() {})
+	})
 }
 
 func TestDoWithRetryCtxRetriesOnAttemptTimeout(t *testing.T) {

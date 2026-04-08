@@ -161,7 +161,7 @@ if ok {
 out := flx.Map(
 	flx.Values(1, 2, 3, 4, 5),
 	func(v int) int { return v * 10 },
-	flx.WithWorkers(4),
+	control.WithWorkers(4),
 )
 ```
 
@@ -171,19 +171,19 @@ out := flx.Map(
 out := flx.Map(
 	flx.Values(1, 2, 3),
 	func(v int) int { return v * 10 },
-	flx.WithUnlimitedWorkers(),
+	control.WithUnlimitedWorkers(),
 )
 ```
 
 ### 动态并发
 
 ```go
-ctrl := flx.NewConcurrencyController(4)
+ctrl := control.NewConcurrencyController(4)
 
 out := flx.Map(
 	flx.Values(1, 2, 3, 4, 5),
 	func(v int) int { return v * 10 },
-	flx.WithDynamicWorkers(ctrl),
+	control.WithDynamicWorkers(ctrl),
 )
 
 ctrl.SetWorkers(8)
@@ -242,7 +242,7 @@ out := flx.FlatMapContext(
 
 ```go
 ctx := context.Background()
-ctrl := flx.NewConcurrencyController(4)
+ctrl := control.NewConcurrencyController(4)
 
 out := flx.MapContext(
 	ctx,
@@ -255,14 +255,14 @@ out := flx.MapContext(
 			return v * 10
 		}
 	},
-	flx.WithForcedDynamicWorkers(ctrl),
+	control.WithForcedDynamicWorkers(ctrl),
 )
 
 ctrl.SetWorkers(1)
 _ = out.Collect()
 ```
 
-如果 worker 被缩容取消，可以通过 `context.Cause(ctx)` 判断是否为 `flx.ErrWorkerLimitReduced`。
+如果 worker 被缩容取消，可以通过 `context.Cause(ctx)` 判断是否为 `control.ErrWorkerLimitReduced`。
 
 ## 9. 重试与超时
 
