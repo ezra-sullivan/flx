@@ -1,40 +1,31 @@
-# flx Usage Guide
+﻿# flx Usage Guide
 
-本文档按“概念 -> API 分类 -> 边界行为 -> 实战建议”的顺序整理 `flx` 的完整使用方式。
+鏈枃妗ｆ寜鈥滄蹇?-> API 鍒嗙被 -> 杈圭晫琛屼负 -> 瀹炴垬寤鸿鈥濈殑椤哄簭鏁寸悊 `flx` 鐨勫畬鏁翠娇鐢ㄦ柟寮忋€?
+濡傛灉浣犲彧鏄涓€娆′笂鎵嬶紝寤鸿鍏堢湅 [quickstart.md](./quickstart.md)銆?
+鏈枃妗ｄ腑鐨勫畬鏁村鍏ヨ矾寰勯粯璁や娇鐢?`github.com/ezra-sullivan/flx`锛屼唬鐮侀噷鐨勫寘鍚嶄粛鐒舵槸 `flx`銆?
+## 1. 蹇冩櫤妯″瀷
 
-如果你只是第一次上手，建议先看 [quickstart.md](./quickstart.md)。
-
-本文档中的完整导入路径默认使用 `github.com/ezra-sullivan/flx`，代码里的包名仍然是 `flx`。
-
-## 1. 心智模型
-
-`flx` 的核心是：
-
+`flx` 鐨勬牳蹇冩槸锛?
 ```go
 type Stream[T any]
 ```
 
-它代表一条基于 channel 的异步处理管道，而不是普通切片包装。
+瀹冧唬琛ㄤ竴鏉″熀浜?channel 鐨勫紓姝ュ鐞嗙閬擄紝鑰屼笉鏄櫘閫氬垏鐗囧寘瑁呫€?
+浣犲彲浠ユ妸瀹冪悊瑙ｄ负锛?
+- 涓婃父鎸佺画浜у嚭 `T`
+- 涓棿鎿嶄綔鎸佺画娑堣垂涓婃父骞朵骇鍑烘柊鐨勭粨鏋?- 缁堢粨鎿嶄綔璐熻矗鏀跺彛
 
-你可以把它理解为：
+杩欏甫鏉ヤ袱涓洿鎺ュ奖鍝嶏細
 
-- 上游持续产出 `T`
-- 中间操作持续消费上游并产出新的结果
-- 终结操作负责收口
+- 鏌愪簺涓棿鎿嶄綔鍦ㄨ皟鐢ㄦ椂灏变細鍒涘缓 goroutine 鎴?channel
+- 鏈€濂芥€绘槸璋冪敤涓€涓粓缁撴搷浣滐紝鎶婃祦鏄惧紡娑堣垂瀹屾垚
 
-这带来两个直接影响：
+## 2. API 鎬讳綋璁捐
 
-- 某些中间操作在调用时就会创建 goroutine 或 channel
-- 最好总是调用一个终结操作，把流显式消费完成
+`flx` 閲囩敤涓ょ被 API锛?
+### 鍚岀被鍨嬫搷浣滀繚鐣欎负鏂规硶
 
-## 2. API 总体设计
-
-`flx` 采用两类 API：
-
-### 同类型操作保留为方法
-
-这些操作不会引入新的类型参数：
-
+杩欎簺鎿嶄綔涓嶄細寮曞叆鏂扮殑绫诲瀷鍙傛暟锛?
 - `Concat`
 - `Filter`
 - `Buffer`
@@ -43,11 +34,10 @@ type Stream[T any]
 - `Head`
 - `Tail`
 - `Skip`
-- 各类终结方法
+- 鍚勭被缁堢粨鏂规硶
 
-### 跨类型操作使用包级泛型函数
-
-这些操作会把 `Stream[T]` 变成 `Stream[U]`，因此写成包级函数：
+### 璺ㄧ被鍨嬫搷浣滀娇鐢ㄥ寘绾ф硾鍨嬪嚱鏁?
+杩欎簺鎿嶄綔浼氭妸 `Stream[T]` 鍙樻垚 `Stream[U]`锛屽洜姝ゅ啓鎴愬寘绾у嚱鏁帮細
 
 - `Map`
 - `MapErr`
@@ -59,13 +49,12 @@ type Stream[T any]
 - `FlatMapContextErr`
 - `Reduce`
 
-这是为了适应 Go 1.26 仍然不支持额外类型参数方法的现实约束。
-
-## 3. 构造 Stream
+杩欐槸涓轰簡閫傚簲 Go 1.26 浠嶇劧涓嶆敮鎸侀澶栫被鍨嬪弬鏁版柟娉曠殑鐜板疄绾︽潫銆?
+## 3. 鏋勯€?Stream
 
 ### `Values`
 
-适合少量固定值：
+閫傚悎灏戦噺鍥哄畾鍊硷細
 
 ```go
 s := flx.Values(1, 2, 3)
@@ -73,7 +62,7 @@ s := flx.Values(1, 2, 3)
 
 ### `From`
 
-适合用代码主动生产元素：
+閫傚悎鐢ㄤ唬鐮佷富鍔ㄧ敓浜у厓绱狅細
 
 ```go
 s := flx.From(func(out chan<- int) {
@@ -83,28 +72,24 @@ s := flx.From(func(out chan<- int) {
 })
 ```
 
-约束：
-
-- 你只负责写入，不需要关闭 channel
-- `flx` 会在生成函数返回后关闭内部 channel
-- 如果生产函数 panic，panic 会被记录到 stream 错误状态；`*Err` 终结操作会返回该错误，默认终结操作在 fail-fast 下会 panic
+绾︽潫锛?
+- 浣犲彧璐熻矗鍐欏叆锛屼笉闇€瑕佸叧闂?channel
+- `flx` 浼氬湪鐢熸垚鍑芥暟杩斿洖鍚庡叧闂唴閮?channel
+- 濡傛灉鐢熶骇鍑芥暟 panic锛宲anic 浼氳璁板綍鍒?stream 閿欒鐘舵€侊紱`*Err` 缁堢粨鎿嶄綔浼氳繑鍥炶閿欒锛岄粯璁ょ粓缁撴搷浣滃湪 fail-fast 涓嬩細 panic
 
 ### `FromChan`
 
-适合接管现有只读 channel：
-
+閫傚悎鎺ョ鐜版湁鍙 channel锛?
 ```go
 s := flx.FromChan(ch)
 ```
 
-约束：
-
-- 调用方必须保证上游最终关闭 channel
+绾︽潫锛?
+- 璋冪敤鏂瑰繀椤讳繚璇佷笂娓告渶缁堝叧闂?channel
 
 ### `Concat`
 
-把多个同类型 stream 合并到一个输出 stream：
-
+鎶婂涓悓绫诲瀷 stream 鍚堝苟鍒颁竴涓緭鍑?stream锛?
 ```go
 merged := flx.Concat(
 	flx.Values(1, 2),
@@ -112,24 +97,19 @@ merged := flx.Concat(
 )
 ```
 
-也可以用方法形式：
-
+涔熷彲浠ョ敤鏂规硶褰㈠紡锛?
 ```go
 merged := flx.Values(1, 2).Concat(flx.Values(3, 4))
 ```
 
-行为说明：
+琛屼负璇存槑锛?
+- 浼氬悎骞朵笂娓搁敊璇姸鎬侊紝鑰屼笉鏄涪鎺夊畠浠?- 涓嶅悓涓婃父涔嬮棿鐨勮緭鍑虹浉瀵归『搴忎笉淇濊瘉
+- 姣忎釜涓婃父鍐呴儴浠嶄繚鎸佸悇鑷殑杈撳嚭椤哄簭
 
-- 会合并上游错误状态，而不是丢掉它们
-- 不同上游之间的输出相对顺序不保证
-- 每个上游内部仍保持各自的输出顺序
-
-## 4. 同类型中间操作
-
+## 4. 鍚岀被鍨嬩腑闂存搷浣?
 ### `Filter`
 
-只保留满足条件的元素：
-
+鍙繚鐣欐弧瓒虫潯浠剁殑鍏冪礌锛?
 ```go
 s := flx.Values(1, 2, 3, 4).Filter(func(v int) bool {
 	return v%2 == 0
@@ -138,15 +118,14 @@ s := flx.Values(1, 2, 3, 4).Filter(func(v int) bool {
 
 ### `Buffer`
 
-调整当前阶段输出 channel 的缓冲区大小：
-
+璋冩暣褰撳墠闃舵杈撳嚭 channel 鐨勭紦鍐插尯澶у皬锛?
 ```go
 s := upstream.Buffer(128)
 ```
 
 ### `Sort`
 
-把当前 stream 全量收集后排序，再重新输出：
+鎶婂綋鍓?stream 鍏ㄩ噺鏀堕泦鍚庢帓搴忥紝鍐嶉噸鏂拌緭鍑猴細
 
 ```go
 s := flx.Values(3, 1, 2).Sort(func(a, b int) bool {
@@ -154,14 +133,12 @@ s := flx.Values(3, 1, 2).Sort(func(a, b int) bool {
 })
 ```
 
-注意：
-
-- 这是一个全量操作，不是流式排序
-- `less` 需要满足稳定且自洽的比较关系
-
+娉ㄦ剰锛?
+- 杩欐槸涓€涓叏閲忔搷浣滐紝涓嶆槸娴佸紡鎺掑簭
+- `less` 闇€瑕佹弧瓒崇ǔ瀹氫笖鑷唇鐨勬瘮杈冨叧绯?
 ### `Reverse`
 
-全量收集后反转顺序：
+鍏ㄩ噺鏀堕泦鍚庡弽杞『搴忥細
 
 ```go
 s := flx.Values(1, 2, 3).Reverse()
@@ -169,51 +146,45 @@ s := flx.Values(1, 2, 3).Reverse()
 
 ### `Head`
 
-保留前 `n` 个元素：
+淇濈暀鍓?`n` 涓厓绱狅細
 
 ```go
 s := flx.Values(1, 2, 3, 4).Head(2)
 ```
 
-约束：
+绾︽潫锛?
+- `n < 1` 浼?panic
 
-- `n < 1` 会 panic
-
-补充说明：
-
-- `Head` 在拿到前 `n` 个元素后，仍会继续 drain 上游再关闭自己的输出
-- 这样可以保证上游 goroutine 收敛，并让后续 `*Err` 终结操作看到晚到的 worker error
+琛ュ厖璇存槑锛?
+- `Head` 鍦ㄦ嬁鍒板墠 `n` 涓厓绱犲悗锛屼粛浼氱户缁?drain 涓婃父鍐嶅叧闂嚜宸辩殑杈撳嚭
+- 杩欐牱鍙互淇濊瘉涓婃父 goroutine 鏀舵暃锛屽苟璁╁悗缁?`*Err` 缁堢粨鎿嶄綔鐪嬪埌鏅氬埌鐨?worker error
 
 ### `Tail`
 
-保留最后 `n` 个元素：
+淇濈暀鏈€鍚?`n` 涓厓绱狅細
 
 ```go
 s := flx.Values(1, 2, 3, 4).Tail(2)
 ```
 
-约束：
-
-- `n < 1` 会 panic
+绾︽潫锛?
+- `n < 1` 浼?panic
 
 ### `Skip`
 
-跳过前 `n` 个元素：
+璺宠繃鍓?`n` 涓厓绱狅細
 
 ```go
 s := flx.Values(1, 2, 3, 4).Skip(2)
 ```
 
-约束：
+绾︽潫锛?
+- `n < 0` 浼?panic
 
-- `n < 0` 会 panic
-
-## 5. 跨类型变换
-
+## 5. 璺ㄧ被鍨嬪彉鎹?
 ### `Map`
 
-1:1 映射：
-
+1:1 鏄犲皠锛?
 ```go
 out := flx.Map(flx.Values(1, 2, 3), func(v int) string {
 	return strconv.Itoa(v)
@@ -222,7 +193,7 @@ out := flx.Map(flx.Values(1, 2, 3), func(v int) string {
 
 ### `MapErr`
 
-1:1 映射，允许返回错误：
+1:1 鏄犲皠锛屽厑璁歌繑鍥為敊璇細
 
 ```go
 out := flx.MapErr(flx.Values("1", "2", "x"), strconv.Atoi)
@@ -231,7 +202,7 @@ items, err := out.CollectErr()
 
 ### `FlatMap`
 
-1:N 映射，由 worker 主动向下游写入：
+1:N 鏄犲皠锛岀敱 worker 涓诲姩鍚戜笅娓稿啓鍏ワ細
 
 ```go
 out := flx.FlatMap(flx.Values(1, 2, 3), func(v int, pipe chan<- int) {
@@ -242,7 +213,7 @@ out := flx.FlatMap(flx.Values(1, 2, 3), func(v int, pipe chan<- int) {
 
 ### `FlatMapErr`
 
-和 `FlatMap` 一样，但允许返回错误：
+鍜?`FlatMap` 涓€鏍凤紝浣嗗厑璁歌繑鍥為敊璇細
 
 ```go
 out := flx.FlatMapErr(in, func(v Item, pipe chan<- Result) error {
@@ -257,8 +228,7 @@ out := flx.FlatMapErr(in, func(v Item, pipe chan<- Result) error {
 
 ### `MapContext` / `FlatMapContext`
 
-在 worker 中显式使用 `context.Context`：
-
+鍦?worker 涓樉寮忎娇鐢?`context.Context`锛?
 ```go
 ctx := context.Background()
 
@@ -272,15 +242,13 @@ out := flx.MapContext(ctx, flx.Values(1, 2, 3), func(ctx context.Context, v int)
 })
 ```
 
-适用场景：
-
-- worker 需要响应取消或超时
-- 需要配合强制动态并发
-- 向下游发送时需要 `SendContext`
+閫傜敤鍦烘櫙锛?
+- worker 闇€瑕佸搷搴斿彇娑堟垨瓒呮椂
+- 闇€瑕侀厤鍚堝己鍒跺姩鎬佸苟鍙?- 鍚戜笅娓稿彂閫佹椂闇€瑕?`SendContext`
 
 ### `MapContextErr` / `FlatMapContextErr`
 
-在显式 context 基础上同时返回错误：
+鍦ㄦ樉寮?context 鍩虹涓婂悓鏃惰繑鍥為敊璇細
 
 ```go
 out := flx.MapContextErr(ctx, in, func(ctx context.Context, v string) (int, error) {
@@ -290,43 +258,35 @@ out := flx.MapContextErr(ctx, in, func(ctx context.Context, v string) (int, erro
 
 ### `DistinctBy`
 
-按 key 去重，保留第一次出现的元素：
-
+鎸?key 鍘婚噸锛屼繚鐣欑涓€娆″嚭鐜扮殑鍏冪礌锛?
 ```go
 out := flx.DistinctBy(users, func(u User) string {
 	return u.Email
 })
 ```
 
-边界说明：
-
-- `DistinctBy` 会维护当前流中所有已见 key
-- 它适合有明确边界的批处理流
-- 如果唯一 key 数持续增长，内存会随之持续增长
-- 对无界流或超高基数流，不建议直接使用全局 `DistinctBy`
+杈圭晫璇存槑锛?
+- `DistinctBy` 浼氱淮鎶ゅ綋鍓嶆祦涓墍鏈夊凡瑙?key
+- 瀹冮€傚悎鏈夋槑纭竟鐣岀殑鎵瑰鐞嗘祦
+- 濡傛灉鍞竴 key 鏁版寔缁闀匡紝鍐呭瓨浼氶殢涔嬫寔缁闀?- 瀵规棤鐣屾祦鎴栬秴楂樺熀鏁版祦锛屼笉寤鸿鐩存帴浣跨敤鍏ㄥ眬 `DistinctBy`
 
 ### `GroupBy`
 
-按 key 分组，输出 `Stream[[]T]`：
-
+鎸?key 鍒嗙粍锛岃緭鍑?`Stream[[]T]`锛?
 ```go
 out := flx.GroupBy(users, func(u User) string {
 	return u.Team
 })
 ```
 
-行为说明：
-
-- 每组内部保持原始输入顺序
-- 组与组之间按 key 第一次出现的顺序输出
-- `GroupBy` 会在输出前消费并缓存整条输入流
-- 它不适合超大数据集或无界流
-- 如果你需要边界化内存的分组，优先考虑窗口化分组或自定义聚合逻辑
+琛屼负璇存槑锛?
+- 姣忕粍鍐呴儴淇濇寔鍘熷杈撳叆椤哄簭
+- 缁勪笌缁勪箣闂存寜 key 绗竴娆″嚭鐜扮殑椤哄簭杈撳嚭
+- `GroupBy` 浼氬湪杈撳嚭鍓嶆秷璐瑰苟缂撳瓨鏁存潯杈撳叆娴?- 瀹冧笉閫傚悎瓒呭ぇ鏁版嵁闆嗘垨鏃犵晫娴?- 濡傛灉浣犻渶瑕佽竟鐣屽寲鍐呭瓨鐨勫垎缁勶紝浼樺厛鑰冭檻绐楀彛鍖栧垎缁勬垨鑷畾涔夎仛鍚堥€昏緫
 
 ### `DistinctByCount` / `GroupByCount`
 
-按输入数量做 tumbling window：
-
+鎸夎緭鍏ユ暟閲忓仛 tumbling window锛?
 ```go
 out := flx.DistinctByCount(users, 1000, func(u User) string {
 	return u.Email
@@ -337,16 +297,12 @@ groups := flx.GroupByCount(users, 1000, func(u User) string {
 })
 ```
 
-行为说明：
-- 每 `n` 个输入元素构成一个窗口
-- `DistinctByCount` 只在窗口内去重；跨窗口相同 key 会重新出现
-- `GroupByCount` 只在窗口内分组；输出类型是 `Stream[flx.Group[K, T]]`
-- 按量窗口比全局 `DistinctBy` / `GroupBy` 更接近硬内存边界
+琛屼负璇存槑锛?- 姣?`n` 涓緭鍏ュ厓绱犳瀯鎴愪竴涓獥鍙?- `DistinctByCount` 鍙湪绐楀彛鍐呭幓閲嶏紱璺ㄧ獥鍙ｇ浉鍚?key 浼氶噸鏂板嚭鐜?- `GroupByCount` 鍙湪绐楀彛鍐呭垎缁勶紱杈撳嚭绫诲瀷鏄?`Stream[flx.Group[K, T]]`
+- 鎸夐噺绐楀彛姣斿叏灞€ `DistinctBy` / `GroupBy` 鏇存帴杩戠‖鍐呭瓨杈圭晫
 
 ### `DistinctByWindow` / `GroupByWindow`
 
-按 processing-time 做 tumbling window：
-
+鎸?processing-time 鍋?tumbling window锛?
 ```go
 ctx := context.Background()
 
@@ -359,34 +315,30 @@ groups := flx.GroupByWindow(ctx, users, 5*time.Second, func(u User) string {
 })
 ```
 
-行为说明：
-- 窗口在收到第一个元素时启动，空窗口不输出
-- `DistinctByWindow` 只在当前时间窗口内去重
-- `GroupByWindow` 会在窗口结束或上游关闭时输出当前窗口内的所有 group
-- `ctx.Done()` 后会停止处理，并尽快回收上游
-- 按时窗口提供的是软边界；如果你需要更稳定的内存上界，优先使用按量窗口
+琛屼负璇存槑锛?- 绐楀彛鍦ㄦ敹鍒扮涓€涓厓绱犳椂鍚姩锛岀┖绐楀彛涓嶈緭鍑?- `DistinctByWindow` 鍙湪褰撳墠鏃堕棿绐楀彛鍐呭幓閲?- `GroupByWindow` 浼氬湪绐楀彛缁撴潫鎴栦笂娓稿叧闂椂杈撳嚭褰撳墠绐楀彛鍐呯殑鎵€鏈?group
+- `ctx.Done()` 鍚庝細鍋滄澶勭悊锛屽苟灏藉揩鍥炴敹涓婃父
+- 鎸夋椂绐楀彛鎻愪緵鐨勬槸杞竟鐣岋紱濡傛灉浣犻渶瑕佹洿绋冲畾鐨勫唴瀛樹笂鐣岋紝浼樺厛浣跨敤鎸夐噺绐楀彛
 
 ### `Chunk`
 
-按固定大小分块：
+鎸夊浐瀹氬ぇ灏忓垎鍧楋細
 
 ```go
 out := flx.Chunk(flx.Values(1, 2, 3, 4, 5), 2)
 ```
 
-输出顺序等价于：
+杈撳嚭椤哄簭绛変环浜庯細
 
 - `[1, 2]`
 - `[3, 4]`
 - `[5]`
 
-约束：
-
-- `n < 1` 会 panic
+绾︽潫锛?
+- `n < 1` 浼?panic
 
 ### `Reduce`
 
-把整个 source channel 交给自定义归约函数：
+鎶婃暣涓?source channel 浜ょ粰鑷畾涔夊綊绾﹀嚱鏁帮細
 
 ```go
 sum, err := flx.Reduce(flx.Values(1, 2, 3), func(ch <-chan int) (int, error) {
@@ -398,21 +350,17 @@ sum, err := flx.Reduce(flx.Values(1, 2, 3), func(ch <-chan int) (int, error) {
 })
 ```
 
-适合：
+閫傚悎锛?
+- 鍋氳嚜瀹氫箟鑱氬悎
+- 闇€瑕佹帶鍒舵秷璐归€昏緫
 
-- 做自定义聚合
-- 需要控制消费逻辑
-
-注意：
-
-- `Reduce` 返回的错误会和 stream 内部错误合并
-- 如果 reducer 提前返回，`flx` 仍会自动 drain 剩余输入，保证上游 goroutine 能正常收敛
-
-## 6. 终结与查询
-
+娉ㄦ剰锛?
+- `Reduce` 杩斿洖鐨勯敊璇細鍜?stream 鍐呴儴閿欒鍚堝苟
+- 濡傛灉 reducer 鎻愬墠杩斿洖锛宍flx` 浠嶄細鑷姩 drain 鍓╀綑杈撳叆锛屼繚璇佷笂娓?goroutine 鑳芥甯告敹鏁?
+## 6. 缁堢粨涓庢煡璇?
 ### `Done` / `DoneErr`
 
-仅消费完流，不关心结果：
+浠呮秷璐瑰畬娴侊紝涓嶅叧蹇冪粨鏋滐細
 
 ```go
 out.Done()
@@ -421,8 +369,7 @@ err := out.DoneErr()
 
 ### `ForEach` / `ForEachErr`
 
-逐个消费：
-
+閫愪釜娑堣垂锛?
 ```go
 out.ForEach(func(v int) {
 	fmt.Println(v)
@@ -431,8 +378,7 @@ out.ForEach(func(v int) {
 
 ### `ForAll` / `ForAllErr`
 
-把底层 channel 暴露给自定义消费逻辑：
-
+鎶婂簳灞?channel 鏆撮湶缁欒嚜瀹氫箟娑堣垂閫昏緫锛?
 ```go
 out.ForAll(func(ch <-chan int) {
 	for v := range ch {
@@ -443,7 +389,7 @@ out.ForAll(func(ch <-chan int) {
 
 ### `Parallel` / `ParallelErr`
 
-把当前 stream 当作任务源，并发执行副作用：
+鎶婂綋鍓?stream 褰撲綔浠诲姟婧愶紝骞跺彂鎵ц鍓綔鐢細
 
 ```go
 err := flx.Values("a", "b", "c").ParallelErr(func(v string) error {
@@ -453,8 +399,7 @@ err := flx.Values("a", "b", "c").ParallelErr(func(v string) error {
 
 ### `Count` / `CountErr`
 
-统计元素数量：
-
+缁熻鍏冪礌鏁伴噺锛?
 ```go
 n := out.Count()
 n, err := out.CountErr()
@@ -462,7 +407,7 @@ n, err := out.CountErr()
 
 ### `Collect` / `CollectErr`
 
-收集成切片：
+鏀堕泦鎴愬垏鐗囷細
 
 ```go
 items := out.Collect()
@@ -471,29 +416,27 @@ items, err := out.CollectErr()
 
 ### `First` / `FirstErr`
 
-获取第一个元素：
+鑾峰彇绗竴涓厓绱狅細
 
 ```go
 v, ok := out.First()
 v, ok, err := out.FirstErr()
 ```
 
-空流时：
+绌烘祦鏃讹細
 
 - `ok == false`
 
-补充说明：
-
-- `First` 仍然属于非 `*Err` 终结操作
-- 如果上游已经记录了 fail-fast 错误，`First` 会像 `Done` / `Collect` 一样 panic
-- `First` 在拿到首个元素后，仍会等待上游 drain 完成，再决定是否暴露晚到的 fail-fast 错误
-- `FirstErr` 现在是真正短路：拿到首个元素后会立即返回，并在后台继续 drain 上游
-- `FirstErr` 返回的是当前时刻的错误快照；返回后才发生的 fail-fast error 不保证包含在 `err` 中
-- 如果你需要稳定的最终错误边界，优先使用 `CollectErr`，或者用 `Head(1).CollectErr()` 显式保留首个元素
+琛ュ厖璇存槑锛?
+- `First` 浠嶇劧灞炰簬闈?`*Err` 缁堢粨鎿嶄綔
+- 濡傛灉涓婃父宸茬粡璁板綍浜?fail-fast 閿欒锛宍First` 浼氬儚 `Done` / `Collect` 涓€鏍?panic
+- `First` 鍦ㄦ嬁鍒伴涓厓绱犲悗锛屼粛浼氱瓑寰呬笂娓?drain 瀹屾垚锛屽啀鍐冲畾鏄惁鏆撮湶鏅氬埌鐨?fail-fast 閿欒
+- `FirstErr` 鐜板湪鏄湡姝ｇ煭璺細鎷垮埌棣栦釜鍏冪礌鍚庝細绔嬪嵆杩斿洖锛屽苟鍦ㄥ悗鍙扮户缁?drain 涓婃父
+- `FirstErr` 杩斿洖鐨勬槸褰撳墠鏃跺埢鐨勯敊璇揩鐓э紱杩斿洖鍚庢墠鍙戠敓鐨?fail-fast error 涓嶄繚璇佸寘鍚湪 `err` 涓?- 濡傛灉浣犻渶瑕佺ǔ瀹氱殑鏈€缁堥敊璇竟鐣岋紝浼樺厛浣跨敤 `CollectErr`锛屾垨鑰呯敤 `Head(1).CollectErr()` 鏄惧紡淇濈暀棣栦釜鍏冪礌
 
 ### `Last` / `LastErr`
 
-获取最后一个元素：
+鑾峰彇鏈€鍚庝竴涓厓绱狅細
 
 ```go
 v, ok := out.Last()
@@ -502,7 +445,7 @@ v, ok, err := out.LastErr()
 
 ### `AllMatch` / `AnyMatch` / `NoneMatch`
 
-做布尔短路判断：
+鍋氬竷灏旂煭璺垽鏂細
 
 ```go
 all := out.AllMatch(func(v int) bool { return v > 0 })
@@ -510,78 +453,67 @@ any := out.AnyMatch(func(v int) bool { return v == 0 })
 none := out.NoneMatch(func(v int) bool { return v < 0 })
 ```
 
-如果你需要显式错误处理，优先使用：
-
+濡傛灉浣犻渶瑕佹樉寮忛敊璇鐞嗭紝浼樺厛浣跨敤锛?
 - `AllMatchErr`
 - `AnyMatchErr`
 - `NoneMatchErr`
 
-补充说明：
-
-- 这些非 `*Err` 短路终结操作同样遵循 fail-fast 语义
-- 如果上游已经记录 fail-fast 错误，它们不会静默吞错，而是会 panic
-- 命中短路条件后，它们仍会等待上游 drain 完成，避免晚到的 fail-fast 错误丢失
-- 对应的 `*Err` 版本现在是真正短路：命中条件后立即返回，并在后台 drain 上游
-- 这些 `*Err` 版本返回的是当前时刻的错误快照；返回后才发生的 fail-fast error 不保证包含在 `err` 中
-- 如果你需要稳定的最终错误边界，优先使用 `DoneErr` / `CollectErr` 等完整消费型终结操作
+琛ュ厖璇存槑锛?
+- 杩欎簺闈?`*Err` 鐭矾缁堢粨鎿嶄綔鍚屾牱閬靛惊 fail-fast 璇箟
+- 濡傛灉涓婃父宸茬粡璁板綍 fail-fast 閿欒锛屽畠浠笉浼氶潤榛樺悶閿欙紝鑰屾槸浼?panic
+- 鍛戒腑鐭矾鏉′欢鍚庯紝瀹冧滑浠嶄細绛夊緟涓婃父 drain 瀹屾垚锛岄伩鍏嶆櫄鍒扮殑 fail-fast 閿欒涓㈠け
+- 瀵瑰簲鐨?`*Err` 鐗堟湰鐜板湪鏄湡姝ｇ煭璺細鍛戒腑鏉′欢鍚庣珛鍗宠繑鍥烇紝骞跺湪鍚庡彴 drain 涓婃父
+- 杩欎簺 `*Err` 鐗堟湰杩斿洖鐨勬槸褰撳墠鏃跺埢鐨勯敊璇揩鐓э紱杩斿洖鍚庢墠鍙戠敓鐨?fail-fast error 涓嶄繚璇佸寘鍚湪 `err` 涓?- 濡傛灉浣犻渶瑕佺ǔ瀹氱殑鏈€缁堥敊璇竟鐣岋紝浼樺厛浣跨敤 `DoneErr` / `CollectErr` 绛夊畬鏁存秷璐瑰瀷缁堢粨鎿嶄綔
 
 ### `Max` / `Min`
 
-按 `less` 规则选出最大/最小值：
+鎸?`less` 瑙勫垯閫夊嚭鏈€澶?鏈€灏忓€硷細
 
 ```go
 best, ok := out.Max(func(a, b int) bool { return a < b })
 least, ok := out.Min(func(a, b int) bool { return a < b })
 ```
 
-如果需要错误返回，使用：
-
+濡傛灉闇€瑕侀敊璇繑鍥烇紝浣跨敤锛?
 - `MaxErr`
 - `MinErr`
 
 ### `Err`
 
-读取当前 stream 已记录的错误状态：
+璇诲彇褰撳墠 stream 宸茶褰曠殑閿欒鐘舵€侊細
 
 ```go
 err := out.Err()
 ```
 
-更推荐的做法仍然是直接在终结点使用 `*Err`。
+鏇存帹鑽愮殑鍋氭硶浠嶇劧鏄洿鎺ュ湪缁堢粨鐐逛娇鐢?`*Err`銆?
+## 7. 骞跺彂閫夐」
 
-## 7. 并发选项
-
-并发 `Option` 只作用于当前操作，不会自动向下游传播。
-
+骞跺彂 `Option` 鍙綔鐢ㄤ簬褰撳墠鎿嶄綔锛屼笉浼氳嚜鍔ㄥ悜涓嬫父浼犳挱銆?
 ### `WithWorkers`
 
-固定并发数：
+鍥哄畾骞跺彂鏁帮細
 
 ```go
 out := flx.Map(in, worker, control.WithWorkers(8))
 ```
 
-说明：
-
-- `workers <= 0` 会被内部提升到最小值 `1`
+璇存槑锛?
+- `workers <= 0` 浼氳鍐呴儴鎻愬崌鍒版渶灏忓€?`1`
 
 ### `WithUnlimitedWorkers`
 
-每个元素一个 worker：
-
+姣忎釜鍏冪礌涓€涓?worker锛?
 ```go
 out := flx.Map(in, worker, control.WithUnlimitedWorkers())
 ```
 
-适合：
-
-- 任务量小
-- 或单个任务极慢、且你明确接受高 goroutine 数
-
+閫傚悎锛?
+- 浠诲姟閲忓皬
+- 鎴栧崟涓换鍔℃瀬鎱€佷笖浣犳槑纭帴鍙楅珮 goroutine 鏁?
 ### `WithDynamicWorkers`
 
-优雅动态并发，缩容时不打断已运行 worker：
-
+浼橀泤鍔ㄦ€佸苟鍙戯紝缂╁鏃朵笉鎵撴柇宸茶繍琛?worker锛?
 ```go
 ctrl := control.NewConcurrencyController(4)
 out := flx.Map(in, worker, control.WithDynamicWorkers(ctrl))
@@ -591,42 +523,36 @@ ctrl.SetWorkers(2)
 
 ### `WithForcedDynamicWorkers`
 
-强制动态并发，缩容时取消多余 worker：
-
+寮哄埗鍔ㄦ€佸苟鍙戯紝缂╁鏃跺彇娑堝浣?worker锛?
 ```go
 ctrl := control.NewConcurrencyController(4)
 out := flx.MapContext(ctx, in, worker, control.WithForcedDynamicWorkers(ctrl))
 ```
 
-重要约束：
-
-- 只能用于 `MapContext*` / `FlatMapContext*`
-- 如果用于非 context 变换，会 panic
+閲嶈绾︽潫锛?
+- 鍙兘鐢ㄤ簬 `MapContext*` / `FlatMapContext*`
+- 濡傛灉鐢ㄤ簬闈?context 鍙樻崲锛屼細 panic
 
 ### `WithInterruptibleWorkers`
 
-兼容别名：
-
+鍏煎鍒悕锛?
 ```go
 out := flx.MapContext(ctx, in, worker, control.WithInterruptibleWorkers(ctrl))
 ```
 
-新代码建议统一改成 `WithForcedDynamicWorkers`。
+鏂颁唬鐮佸缓璁粺涓€鏀规垚 `WithForcedDynamicWorkers`銆?
+## 8. 閿欒妯″瀷
 
-## 8. 错误模型
+### 榛樿绛栫暐锛歚ErrorStrategyFailFast`
 
-### 默认策略：`ErrorStrategyFailFast`
+worker 杩斿洖閿欒鎴?panic 鏃讹細
 
-worker 返回错误或 panic 时：
-
-- 记录错误
-- 取消当前操作
-- 在终结阶段暴露错误
-
+- 璁板綍閿欒
+- 鍙栨秷褰撳墠鎿嶄綔
+- 鍦ㄧ粓缁撻樁娈垫毚闇查敊璇?
 ### `ErrorStrategyCollect`
 
-继续执行所有 worker，最后把错误聚合起来：
-
+缁х画鎵ц鎵€鏈?worker锛屾渶鍚庢妸閿欒鑱氬悎璧锋潵锛?
 ```go
 out := flx.MapErr(
 	in,
@@ -637,7 +563,7 @@ out := flx.MapErr(
 
 ### `ErrorStrategyLogAndContinue`
 
-记录日志并继续，不把错误写入 stream 状态：
+璁板綍鏃ュ織骞剁户缁紝涓嶆妸閿欒鍐欏叆 stream 鐘舵€侊細
 
 ```go
 out := flx.MapErr(
@@ -649,8 +575,7 @@ out := flx.MapErr(
 
 ### `WorkerError`
 
-worker 显式返回错误或 panic 都会统一包装为 `WorkerError`：
-
+worker 鏄惧紡杩斿洖閿欒鎴?panic 閮戒細缁熶竴鍖呰涓?`WorkerError`锛?
 ```go
 var workerErr *control.WorkerError
 
@@ -659,17 +584,13 @@ if errors.As(err, &workerErr) {
 }
 ```
 
-### 实际建议
+### 瀹為檯寤鸿
 
-- 业务代码里，如果你需要稳定的最终错误边界，优先使用完整消费型 `*Err` API，例如 `DoneErr` / `CollectErr`
-- `FirstErr` / `AllMatchErr` / `AnyMatchErr` / `NoneMatchErr` 现在是低延迟短路查询，返回的是当前错误快照而不是最终错误集合
-- 只有你明确接受“出错即 panic”时，再使用非 `*Err` 终结操作
-- 做批处理统计时，`ErrorStrategyCollect` 往往比 `fail-fast` 更合适
-- `flx` 默认把错误建模为 stream 状态；如果你确实要把“每条数据自己的失败结果”继续往下游传，请自己定义业务结构体，并把它当普通数据处理
-
-### item 级结果模式
-
-如果你从 `fx` 迁移过来，之前习惯把 `error` 塞回每个 item，可以继续这样写，但要把它视为业务数据，而不是 `flx` 的官方错误模型：
+- 涓氬姟浠ｇ爜閲岋紝濡傛灉浣犻渶瑕佺ǔ瀹氱殑鏈€缁堥敊璇竟鐣岋紝浼樺厛浣跨敤瀹屾暣娑堣垂鍨?`*Err` API锛屼緥濡?`DoneErr` / `CollectErr`
+- `FirstErr` / `AllMatchErr` / `AnyMatchErr` / `NoneMatchErr` 鐜板湪鏄綆寤惰繜鐭矾鏌ヨ锛岃繑鍥炵殑鏄綋鍓嶉敊璇揩鐓ц€屼笉鏄渶缁堥敊璇泦鍚?- 鍙湁浣犳槑纭帴鍙椻€滃嚭閿欏嵆 panic鈥濇椂锛屽啀浣跨敤闈?`*Err` 缁堢粨鎿嶄綔
+- 鍋氭壒澶勭悊缁熻鏃讹紝`ErrorStrategyCollect` 寰€寰€姣?`fail-fast` 鏇村悎閫?- `flx` 榛樿鎶婇敊璇缓妯′负 stream 鐘舵€侊紱濡傛灉浣犵‘瀹炶鎶娾€滄瘡鏉℃暟鎹嚜宸辩殑澶辫触缁撴灉鈥濈户缁線涓嬫父浼狅紝璇疯嚜宸卞畾涔変笟鍔＄粨鏋勪綋锛屽苟鎶婂畠褰撴櫘閫氭暟鎹鐞?
+### item 绾х粨鏋滄ā寮?
+濡傛灉浣犱粠 `fx` 杩佺Щ杩囨潵锛屼箣鍓嶄範鎯妸 `error` 濉炲洖姣忎釜 item锛屽彲浠ョ户缁繖鏍峰啓锛屼絾瑕佹妸瀹冭涓轰笟鍔℃暟鎹紝鑰屼笉鏄?`flx` 鐨勫畼鏂归敊璇ā鍨嬶細
 
 ```go
 type ItemResult[T any] struct {
@@ -685,53 +606,42 @@ out := flx.Map(flx.Values("1", "x", "3"), func(v string) ItemResult[int] {
 results := out.Collect()
 ```
 
-适用场景：
+閫傜敤鍦烘櫙锛?
+- 浣犺淇濈暀姣忔潯璁板綍鐨勬垚鍔?澶辫触缁撴灉锛屾渶鍚庣粺涓€缁熻銆佽惤搴撴垨褰掓。
+- 浣犳帴鍙楀崟鏉″け璐ヤ笉缁堟娴佹按绾?
+涓嶉€傜敤鍦烘櫙锛?
+- 浣犲笇鏈?worker error銆乸anic銆乼imeout銆乧ontext cancel 璧扮粺涓€鐨?stream 閿欒杈圭晫
+- 浣犻渶瑕?`DoneErr` / `CollectErr` 鏆撮湶鏈€缁堥敊璇?
+## 9. context 涓庡彇娑?
+### 鏄惧紡浼犲叆 context
 
-- 你要保留每条记录的成功/失败结果，最后统一统计、落库或归档
-- 你接受单条失败不终止流水线
-
-不适用场景：
-
-- 你希望 worker error、panic、timeout、context cancel 走统一的 stream 错误边界
-- 你需要 `DoneErr` / `CollectErr` 暴露最终错误
-
-## 9. context 与取消
-
-### 显式传入 context
-
-`flx` 不再通过 option 注入父 context，而是直接写成 API 参数：
-
+`flx` 涓嶅啀閫氳繃 option 娉ㄥ叆鐖?context锛岃€屾槸鐩存帴鍐欐垚 API 鍙傛暟锛?
 ```go
 out := flx.MapContext(ctx, in, worker)
 ```
 
-这样做的好处是：
+杩欐牱鍋氱殑濂藉鏄細
 
-- context 来源明确
-- API 语义更稳定
-- 不需要 `WithParentContext`
+- context 鏉ユ簮鏄庣‘
+- API 璇箟鏇寸ǔ瀹?- 涓嶉渶瑕?`WithParentContext`
 
 ### `SendContext`
 
-当 worker 向下游写入时，如果你希望在取消后尽快停止发送，使用：
-
+褰?worker 鍚戜笅娓稿啓鍏ユ椂锛屽鏋滀綘甯屾湜鍦ㄥ彇娑堝悗灏藉揩鍋滄鍙戦€侊紝浣跨敤锛?
 ```go
 ok := flx.SendContext(ctx, pipe, item)
 ```
 
-返回值：
+杩斿洖鍊硷細
 
-- `true`：发送成功
-- `false`：发送前已被取消
+- `true`锛氬彂閫佹垚鍔?- `false`锛氬彂閫佸墠宸茶鍙栨秷
 
-补充说明：
+琛ュ厖璇存槑锛?
+- `MapContext` / `MapContextErr` 鐨勫崟缁撴灉鍙戦€佸凡缁忓唴寤哄彇娑堟劅鐭?- 浣犺嚜宸卞湪 `FlatMapContext*` 鎴栧叾瀹冭嚜瀹氫箟 worker 涓悜涓嬫父鍙戦€佸€兼椂锛屼粛鐒跺簲璇ヤ紭鍏堜娇鐢?`SendContext`
 
-- `MapContext` / `MapContextErr` 的单结果发送已经内建取消感知
-- 你自己在 `FlatMapContext*` 或其它自定义 worker 中向下游发送值时，仍然应该优先使用 `SendContext`
+### 缂╁鍙栨秷鍘熷洜
 
-### 缩容取消原因
-
-强制动态并发下，如果 worker 因缩容被取消，可以判断：
+寮哄埗鍔ㄦ€佸苟鍙戜笅锛屽鏋?worker 鍥犵缉瀹硅鍙栨秷锛屽彲浠ュ垽鏂細
 
 ```go
 if errors.Is(context.Cause(ctx), control.ErrWorkerLimitReduced) {
@@ -739,21 +649,19 @@ if errors.Is(context.Cause(ctx), control.ErrWorkerLimitReduced) {
 }
 ```
 
-## 10. 独立并发工具
+## 10. 鐙珛骞跺彂宸ュ叿
 
-除了 stream API，`flx` 还提供了包级并发执行工具。
-
+闄や簡 stream API锛宍flx` 杩樻彁渚涗簡鍖呯骇骞跺彂鎵ц宸ュ叿銆?
 ### `Parallel`
 
-并发执行多个无返回错误的函数，失败时 panic：
-
+骞跺彂鎵ц澶氫釜鏃犺繑鍥為敊璇殑鍑芥暟锛屽け璐ユ椂 panic锛?
 ```go
 flx.Parallel(task1, task2, task3)
 ```
 
 ### `ParallelWithErrorStrategy`
 
-为并发执行设置错误策略：
+涓哄苟鍙戞墽琛岃缃敊璇瓥鐣ワ細
 
 ```go
 err := flx.ParallelWithErrorStrategy(
@@ -765,7 +673,7 @@ err := flx.ParallelWithErrorStrategy(
 
 ### `ParallelErr`
 
-并发执行多个返回错误的函数，并聚合错误：
+骞跺彂鎵ц澶氫釜杩斿洖閿欒鐨勫嚱鏁帮紝骞惰仛鍚堥敊璇細
 
 ```go
 err := flx.ParallelErr(task1, task2, task3)
@@ -775,8 +683,7 @@ err := flx.ParallelErr(task1, task2, task3)
 
 ### `DoWithRetry`
 
-对普通函数做重试：
-
+瀵规櫘閫氬嚱鏁板仛閲嶈瘯锛?
 ```go
 err := flx.DoWithRetry(
 	call,
@@ -787,8 +694,7 @@ err := flx.DoWithRetry(
 
 ### `DoWithRetryCtx`
 
-对显式接收 context 的函数做重试：
-
+瀵规樉寮忔帴鏀?context 鐨勫嚱鏁板仛閲嶈瘯锛?
 ```go
 err := flx.DoWithRetryCtx(
 	context.Background(),
@@ -799,24 +705,20 @@ err := flx.DoWithRetryCtx(
 )
 ```
 
-### Retry 选项
+### Retry 閫夐」
 
-- `WithRetry(n)`：重试次数
-- `WithInterval(d)`：每次重试间隔
-- `WithTimeout(d)`：整个重试过程的总超时
-- `WithAttemptTimeout(d)`：单次尝试超时，仅 `DoWithRetryCtx` 可用
-- `WithIgnoreErrors(errs)`：命中这些错误时直接视为成功
+- `WithRetry(n)`锛氶噸璇曟鏁?- `WithInterval(d)`锛氭瘡娆￠噸璇曢棿闅?- `WithTimeout(d)`锛氭暣涓噸璇曡繃绋嬬殑鎬昏秴鏃?- `WithAttemptTimeout(d)`锛氬崟娆″皾璇曡秴鏃讹紝浠?`DoWithRetryCtx` 鍙敤
+- `WithIgnoreErrors(errs)`锛氬懡涓繖浜涢敊璇椂鐩存帴瑙嗕负鎴愬姛
 
-注意：
-
-- `WithAttemptTimeout` 用在 `DoWithRetry` 上会 panic
-- 各种负时间或非法次数会 panic
+娉ㄦ剰锛?
+- `WithAttemptTimeout` 鐢ㄥ湪 `DoWithRetry` 涓婁細 panic
+- 鍚勭璐熸椂闂存垨闈炴硶娆℃暟浼?panic
 
 ## 12. timeout
 
 ### `DoWithTimeout`
 
-给普通函数包一层超时：
+缁欐櫘閫氬嚱鏁板寘涓€灞傝秴鏃讹細
 
 ```go
 err := flx.DoWithTimeout(call, 5*time.Second)
@@ -824,7 +726,7 @@ err := flx.DoWithTimeout(call, 5*time.Second)
 
 ### `DoWithTimeoutCtx`
 
-给接收 context 的函数包一层超时：
+缁欐帴鏀?context 鐨勫嚱鏁板寘涓€灞傝秴鏃讹細
 
 ```go
 err := flx.DoWithTimeoutCtx(func(ctx context.Context) error {
@@ -834,8 +736,7 @@ err := flx.DoWithTimeoutCtx(func(ctx context.Context) error {
 
 ### `WithContext`
 
-给 timeout 指定父 context：
-
+缁?timeout 鎸囧畾鐖?context锛?
 ```go
 err := flx.DoWithTimeoutCtx(
 	func(ctx context.Context) error { return callWithContext(ctx) },
@@ -844,79 +745,195 @@ err := flx.DoWithTimeoutCtx(
 )
 ```
 
-### 常见错误
+### 甯歌閿欒
 
 - `ErrCanceled`
 - `ErrTimeout`
 - `ErrNilContext`
 - `ErrNegativeTimeout`
 
-## 13. 最佳实践
+## 13. 鏈€浣冲疄璺?
+### 1. 榛樿浼樺厛绋冲畾閿欒杈圭晫鐨勭粓缁撴搷浣?
+濡傛灉浣犻渶瑕佹渶缁堥敊璇粨鏋滐紝浼樺厛浣跨敤浼氬畬鏁存秷璐?source 鐨勭粓缁撴搷浣滐紝渚嬪 `DoneErr` / `CollectErr`銆?
+`FirstErr` / `AllMatchErr` / `AnyMatchErr` / `NoneMatchErr` 鏇撮€傚悎浣庡欢杩熺煭璺煡璇紝鑰屼笉鏄嬁鏈€缁堥敊璇泦鍚堛€?
+### 2. worker 鍚戜笅娓稿啓鍏ユ椂浼樺厛 `SendContext`
 
-### 1. 默认优先稳定错误边界的终结操作
+灏ゅ叾鏄湪 `FlatMapContext*` 鍜屽己鍒跺姩鎬佸苟鍙戜笅銆?
+`MapContext*` 鐨勫崟缁撴灉鍙戦€佸凡缁忓唴寤哄彇娑堟劅鐭ワ紝浣嗚嚜瀹氫箟澶氭鍙戦€佸満鏅粛鐒跺簲鏄惧紡浣跨敤 `SendContext`銆?
+### 3. `WithUnlimitedWorkers` 瑕佽皑鎱?
+瀹冨緢鏂逛究锛屼絾涔熸渶瀹规槗鏀惧ぇ goroutine 鏁伴噺鍜屽唴瀛樺帇鍔涖€?
+### 4. 鍏ㄩ噺鎴栫疮璁″唴瀛樻搷浣滆娉ㄦ剰鎴愭湰
 
-如果你需要最终错误结果，优先使用会完整消费 source 的终结操作，例如 `DoneErr` / `CollectErr`。
-
-`FirstErr` / `AllMatchErr` / `AnyMatchErr` / `NoneMatchErr` 更适合低延迟短路查询，而不是拿最终错误集合。
-
-### 2. worker 向下游写入时优先 `SendContext`
-
-尤其是在 `FlatMapContext*` 和强制动态并发下。
-
-`MapContext*` 的单结果发送已经内建取消感知，但自定义多次发送场景仍然应显式使用 `SendContext`。
-
-### 3. `WithUnlimitedWorkers` 要谨慎
-
-它很方便，但也最容易放大 goroutine 数量和内存压力。
-
-### 4. 全量或累计内存操作要注意成本
-
-以下操作会把当前流整体或显著累计到内存中：
-
+浠ヤ笅鎿嶄綔浼氭妸褰撳墠娴佹暣浣撴垨鏄捐憲绱鍒板唴瀛樹腑锛?
 - `Sort`
 - `Reverse`
 - `Collect`
 - `DistinctBy`
 - `GroupBy`
 
-补充说明：
+琛ュ厖璇存槑锛?
+- `Tail(n)` 鍙繚鐣欐渶鍚?`n` 涓厓绱?- `Chunk(n)` 鍙繚鐣欏綋鍓?chunk锛屼笉浼氫竴娆℃€х紦瀛樻暣涓祦
+- `DistinctBy` 鐨勬垚鏈殢鍞竴 key 鏁板闀?- `GroupBy` 鐨勬垚鏈殢鏁存潯杈撳叆娴佸闀?- `DistinctByCount` / `GroupByCount` 鎻愪緵鎸夐噺 tumbling window锛屾洿鎺ヨ繎纭竟鐣?- `DistinctByWindow` / `GroupByWindow` 鎻愪緵鎸夋椂 tumbling window锛屽睘浜庤蒋杈圭晫
 
-- `Tail(n)` 只保留最后 `n` 个元素
-- `Chunk(n)` 只保留当前 chunk，不会一次性缓存整个流
-- `DistinctBy` 的成本随唯一 key 数增长
-- `GroupBy` 的成本随整条输入流增长
-- `DistinctByCount` / `GroupByCount` 提供按量 tumbling window，更接近硬边界
-- `DistinctByWindow` / `GroupByWindow` 提供按时 tumbling window，属于软边界
+### 5. 闇€瑕佺ǔ瀹氶敊璇涓烘椂锛岀敤 `DoneErr` / `CollectErr`
 
-### 5. 需要稳定错误行为时，用 `DoneErr` / `CollectErr`
+杩欐牱姣斾緷璧?panic 鏇撮€傚悎绾夸笂鏈嶅姟鍜屽崟鍏冩祴璇曘€?
+## 14. 甯歌杩佺Щ鎻愰啋
 
-这样比依赖 panic 更适合线上服务和单元测试。
+浠?`fx` 杩佺Щ鍒?`flx` 鏃讹紝鏈€瀹规槗韪╃殑鍑犱釜鐐规槸锛?
+- `Just` 鏀瑰悕涓?`Values`
+- `Range` 鏀瑰悕涓?`FromChan`
+- `stream.Map(...)` 鏀逛负 `flx.Map(stream, ...)`
+- `stream.Walk(...)` 鏀逛负 `flx.FlatMap(stream, ...)`
+- `WalkCtx*` 鏀逛负鏄惧紡 `ctx` 鐨?`MapContext*` / `FlatMapContext*`
+- `First` / `Last` / `Max` / `Min` 鐜板湪閮借繑鍥?`ok`
+- 濡傛灉浣犱互鍓嶅湪娴侀噷浼?`struct{ Value T; Err error }` 杩欑被缁撴灉瀵硅薄锛宍flx` 閲岀户缁嚜瀹氫箟鍗冲彲锛屼絾涓嶈鎶婂畠鍜?`MapErr` / `CollectErr` 瑙嗕负鍚屼竴灞傞敊璇涔?
+濡傞渶浠?`fx` 杩佺Щ锛岃缁撳悎 README 鍜?`quickstart.md` 涓殑 API 瀵圭収璇存槑閫愭鏇挎崲銆?
+## 15. 瀹炴垬绀轰緥
 
-## 14. 常见迁移提醒
+濡傛灉浣犳兂鐪嬩竴鏉″寘鍚涓?stage銆佷笖姣忎釜 stage 浣跨敤涓嶅悓 worker 绛栫暐鐨?HTTP pipeline锛屽彲浠ュ弬鑰冭繖涓畬鏁寸ず渚嬶細
 
-从 `fx` 迁移到 `flx` 时，最容易踩的几个点是：
+- [HTTP 鍥剧墖澶勭悊娴佹按绾跨ず渚媇(./examples/http-image-pipeline.md)
 
-- `Just` 改名为 `Values`
-- `Range` 改名为 `FromChan`
-- `stream.Map(...)` 改为 `flx.Map(stream, ...)`
-- `stream.Walk(...)` 改为 `flx.FlatMap(stream, ...)`
-- `WalkCtx*` 改为显式 `ctx` 的 `MapContext*` / `FlatMapContext*`
-- `First` / `Last` / `Max` / `Min` 现在都返回 `ok`
-- 如果你以前在流里传 `struct{ Value T; Err error }` 这类结果对象，`flx` 里继续自定义即可，但不要把它和 `MapErr` / `CollectErr` 视为同一层错误语义
+杩欎釜绀轰緥灞曠ず浜嗭細
 
-如需从 `fx` 迁移，请结合 README 和 `quickstart.md` 中的 API 对照说明逐步替换。
+- HTTP 鍒嗛〉鍒楀嚭鍥剧墖
+- 鍥哄畾 worker 涓嬭浇
+- 鍔ㄦ€?worker 鍋氱缉鏀?- 鍥哄畾 worker 鍔犳按鍗板苟涓婁紶
+- 鎺ㄨ崘鐨?stage 鍑芥暟缁勫悎鍐欐硶
+- 瀵圭収鐨勫師鐢?`flx` API 閫愭鎷兼帴鍐欐硶
 
-## 15. 实战示例
+## 16. Pipeline Coordinator
 
-如果你想看一条包含多个 stage、且每个 stage 使用不同 worker 策略的 HTTP pipeline，可以参考这个完整示例：
+如果你希望根据 stage backlog、link backlog 和资源压力去调节动态 worker，而不是在业务代码里手动 `SetWorkers(...)`，就使用 `pipeline/coordinator`。
 
-- [HTTP 图片处理流水线示例](./examples/http-image-pipeline.md)
+### 核心接法
 
-这个示例展示了：
+典型接法有四步：
 
-- HTTP 分页列出图片
-- 固定 worker 下载
-- 动态 worker 做缩放
-- 固定 worker 加水印并上传
-- 推荐的 stage 函数组合写法
-- 对照的原生 `flx` API 逐段拼接写法
+- 创建 `PipelineCoordinator`
+- 在 stage 上挂 `coordinator.WithCoordinator(...)`
+- 给 stage 标名字 `coordinator.WithStageName(...)`
+- 只给需要被调节的动态 stage 配 `coordinator.WithStageBudget(...)`
+
+示例：
+
+```go
+pipelineCoordinator := coordinator.NewPipelineCoordinator(
+	coordinator.PipelineCoordinatorPolicy{
+		ScaleUpStep:         1,
+		ScaleDownStep:       1,
+		ScaleUpCooldown:     500 * time.Millisecond,
+		ScaleDownCooldown:   750 * time.Millisecond,
+		ScaleUpHysteresis:   1,
+		ScaleDownHysteresis: 2,
+	},
+	coordinator.WithResourceObserver(myResourceObserver),
+)
+
+images := flx.Stage(
+	ctx,
+	listedImages,
+	download,
+	control.WithWorkers(4),
+	coordinator.WithCoordinator(pipelineCoordinator),
+	coordinator.WithStageName("download"),
+).Through(
+	ctx,
+	resize,
+	control.WithForcedDynamicWorkers(resizeController),
+	coordinator.WithCoordinator(pipelineCoordinator),
+	coordinator.WithStageName("resize"),
+	coordinator.WithStageBudget(coordinator.StageBudget{MinWorkers: 2, MaxWorkers: 8}),
+)
+```
+
+### `Snapshot()` 和 `Tick()`
+
+`PipelineCoordinator` 当前是显式控制模型：
+
+- `Snapshot()` 返回当前 pipeline 观测视图
+- `Tick()` 做一次策略判断并尝试调整 worker
+
+当前 `Snapshot()` 包含三部分：
+
+- `Stages`
+- `Links`
+- `Resources`
+
+也就是说，你现在可以同时看到：
+
+- stage 内部 backlog
+- stage 间 link backlog
+- 外部资源压力样本
+
+### `PipelineCoordinatorPolicy` 字段语义
+
+- `ScaleUpStep`
+  每次扩容最多增加多少 worker。
+- `ScaleDownStep`
+  每次缩容最多减少多少 worker。
+- `ScaleUpCooldown`
+  同一 stage 两次扩容之间的最小时间间隔。
+- `ScaleDownCooldown`
+  同一 stage 两次缩容之间的最小时间间隔。
+- `ScaleUpHysteresis`
+  扩容信号需要连续满足多少个 `Tick()` 才会真正扩容。
+- `ScaleDownHysteresis`
+  缩容信号需要连续满足多少个 `Tick()` 才会真正缩容。
+
+默认值是保守兼容的：
+
+- `ScaleUpStep <= 0` 按 `1` 处理
+- `ScaleDownStep <= 0` 按 `1` 处理
+- `ScaleUpCooldown < 0` 按 `0` 处理
+- `ScaleDownCooldown < 0` 按 `0` 处理
+- `ScaleUpHysteresis <= 0` 按 `1` 处理
+- `ScaleDownHysteresis <= 0` 按 `1` 处理
+
+### 当前策略重点
+
+当前 `Tick()` 的优先级大致是：
+
+1. `budget_min`
+2. 资源 `critical` 下对空闲 stage 的 shrink bias
+3. `incoming_link_backlog`
+4. `stage_backlog`
+5. `idle_shrink`
+
+当前语义重点：
+
+- 下游 link backlog 优先于上游缩容
+- `warning` 级资源压力会 brake scale-up
+- `critical` 级资源压力会对空闲 stage 施加 shrink bias
+- `budget_min` 是硬纠偏，不受 cooldown / hysteresis 限制
+- cooldown / hysteresis 是按 stage、按方向分别生效的
+
+### 适用边界
+
+当前 coordinator 只会调整：
+
+- 挂了 `WithCoordinator(...)`
+- 使用了动态 controller
+- 同时配置了 `WithStageBudget(...)`
+
+的 stage。
+
+这意味着：
+
+- 固定 worker stage 仍然可以被观测
+- 但不会被 coordinator 改 worker 数
+
+### Resource Observer
+
+`WithResourceObserver(...)` 可以接任何资源压力采样源，只要它能返回 `observe.ResourceSnapshot`。
+
+最常见的接法包括：
+
+- 内存
+- 网络
+- CPU
+- 外部队列长度
+- 下游服务限流状态
+
+当前内置示例使用的是基于 `runtime.MemStats` 的 memory observer，完整可运行接法见 [examples/http-image-pipeline.md](./examples/http-image-pipeline.md)。

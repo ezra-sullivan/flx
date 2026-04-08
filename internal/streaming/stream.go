@@ -2,6 +2,7 @@ package streaming
 
 import (
 	"github.com/ezra-sullivan/flx/internal/collections"
+	"github.com/ezra-sullivan/flx/internal/link"
 	rt "github.com/ezra-sullivan/flx/internal/runtime"
 	"github.com/ezra-sullivan/flx/internal/state"
 	"slices"
@@ -33,6 +34,7 @@ func wrapWorkerError(err error) error {
 type Stream[T any] struct {
 	source <-chan T
 	state  state.Handle
+	link   *link.Meter
 }
 
 // New wraps source with a fresh local error state.
@@ -43,6 +45,11 @@ func New[T any](source <-chan T) Stream[T] {
 // WithState wraps source with handle, creating a fresh state when nil is
 // provided.
 func WithState[T any](source <-chan T, handle state.Handle) Stream[T] {
+	return WithStateAndLink(source, handle, nil)
+}
+
+// WithStateAndLink wraps source with handle and optional outbound link meter.
+func WithStateAndLink[T any](source <-chan T, handle state.Handle, linkMeter *link.Meter) Stream[T] {
 	if handle == nil {
 		handle = state.NewStream()
 	}
@@ -50,6 +57,7 @@ func WithState[T any](source <-chan T, handle state.Handle) Stream[T] {
 	return Stream[T]{
 		source: source,
 		state:  handle,
+		link:   linkMeter,
 	}
 }
 
@@ -98,6 +106,10 @@ func (s Stream[T]) withSource(source <-chan T) Stream[T] {
 	return WithState(source, s.state)
 }
 
+func (s Stream[T]) withSourceAndLink(source <-chan T, linkMeter *link.Meter) Stream[T] {
+	return WithStateAndLink(source, s.state, linkMeter)
+}
+
 // Concat merges s with others while preserving per-stream item order. Items
 // from different input streams may interleave based on runtime scheduling.
 func (s Stream[T]) Concat(others ...Stream[T]) Stream[T] {
@@ -112,14 +124,22 @@ func (s Stream[T]) Concat(others ...Stream[T]) Stream[T] {
 	go func() {
 		var group rt.RoutineGroup
 		group.Run(func() {
-			for item := range s.source {
+			for {
+				item, ok := s.next()
+				if !ok {
+					return
+				}
 				source <- item
 			}
 		})
 		for _, each := range others {
 			each := each
 			group.Run(func() {
-				for item := range each.source {
+				for {
+					item, ok := each.next()
+					if !ok {
+						return
+					}
 					source <- item
 				}
 			})
@@ -149,7 +169,11 @@ func (s Stream[T]) Buffer(n int) Stream[T] {
 
 	source := make(chan T, n)
 	go func() {
-		for item := range s.source {
+		for {
+			item, ok := s.next()
+			if !ok {
+				break
+			}
 			source <- item
 		}
 		close(source)
@@ -162,7 +186,11 @@ func (s Stream[T]) Buffer(n int) Stream[T] {
 // stream.
 func (s Stream[T]) Sort(less func(T, T) bool) Stream[T] {
 	var items []T
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		items = append(items, item)
 	}
 	slices.SortFunc(items, func(a, b T) int {
@@ -189,7 +217,11 @@ func (s Stream[T]) Sort(less func(T, T) bool) Stream[T] {
 // stream.
 func (s Stream[T]) Reverse() Stream[T] {
 	var items []T
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		items = append(items, item)
 	}
 	slices.Reverse(items)
@@ -212,13 +244,17 @@ func (s Stream[T]) Head(n int64) Stream[T] {
 
 	source := make(chan T)
 	go func() {
-		for item := range s.source {
+		for {
+			item, ok := s.next()
+			if !ok {
+				break
+			}
 			n--
 			if n >= 0 {
 				source <- item
 			}
 			if n == 0 {
-				drain(s.source)
+				s.drainSource()
 				close(source)
 				return
 			}
@@ -238,7 +274,11 @@ func (s Stream[T]) Tail(n int64) Stream[T] {
 	source := make(chan T)
 	go func() {
 		ring := collections.NewRing[T](int(n))
-		for item := range s.source {
+		for {
+			item, ok := s.next()
+			if !ok {
+				break
+			}
 			ring.Add(item)
 		}
 		for _, item := range ring.Take() {
@@ -261,7 +301,11 @@ func (s Stream[T]) Skip(n int64) Stream[T] {
 
 	source := make(chan T)
 	go func() {
-		for item := range s.source {
+		for {
+			item, ok := s.next()
+			if !ok {
+				break
+			}
 			n--
 			if n >= 0 {
 				continue

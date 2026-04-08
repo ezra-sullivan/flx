@@ -4,6 +4,9 @@ import (
 	"errors"
 
 	"github.com/ezra-sullivan/flx/internal/control"
+	coordinatorinternal "github.com/ezra-sullivan/flx/internal/coordinator"
+	"github.com/ezra-sullivan/flx/internal/link"
+	"github.com/ezra-sullivan/flx/internal/metrics"
 )
 
 const (
@@ -23,11 +26,17 @@ var (
 
 // Options stores execution settings for one transform or terminal operation.
 type Options struct {
-	workers       int
-	unlimited     bool
-	controller    *control.Controller
-	interruptible bool
-	errorStrategy ErrorStrategy
+	workers              int
+	unlimited            bool
+	controller           *control.Controller
+	interruptible        bool
+	errorStrategy        ErrorStrategy
+	coordinator          *coordinatorinternal.Coordinator
+	stageName            string
+	resolvedStageName    string
+	stageBudget          coordinatorinternal.StageBudget
+	linkMetricsObserver  link.MetricsObserver
+	stageMetricsObserver metrics.StageMetricsObserver
 }
 
 // Option mutates the execution settings for one transform or terminal call.
@@ -96,6 +105,46 @@ func WithErrorStrategy(strategy ErrorStrategy) Option {
 	}
 }
 
+// WithStageMetricsObserver registers the callback that receives stage metrics.
+func WithStageMetricsObserver(observer metrics.StageMetricsObserver) Option {
+	return func(opts *Options) {
+		opts.stageMetricsObserver = observer
+	}
+}
+
+// WithLinkMetricsObserver registers the callback that receives link metrics.
+func WithLinkMetricsObserver(observer link.MetricsObserver) Option {
+	return func(opts *Options) {
+		opts.linkMetricsObserver = observer
+	}
+}
+
+// WithStageName labels the current transform or terminal operation as one
+// named stage.
+func WithStageName(name string) Option {
+	return func(opts *Options) {
+		opts.stageName = name
+		opts.resolvedStageName = ""
+	}
+}
+
+// WithCoordinator registers one pipeline coordinator to receive runtime
+// snapshots for this operation.
+func WithCoordinator(coordinator *coordinatorinternal.Coordinator) Option {
+	return func(opts *Options) {
+		opts.coordinator = coordinator
+		opts.resolvedStageName = ""
+	}
+}
+
+// WithStageBudget constrains one coordinator-managed dynamic stage to a worker
+// budget window.
+func WithStageBudget(budget coordinatorinternal.StageBudget) Option {
+	return func(opts *Options) {
+		opts.stageBudget = budget
+	}
+}
+
 // NewOptions returns the default operation settings.
 func NewOptions() *Options {
 	return &Options{
@@ -149,4 +198,69 @@ func (o *Options) ErrorStrategy() ErrorStrategy {
 	}
 
 	return o.errorStrategy
+}
+
+// StageMetricsObserver returns the configured observer for stage metrics.
+func (o *Options) StageMetricsObserver() metrics.StageMetricsObserver {
+	if o == nil {
+		return nil
+	}
+
+	return o.stageMetricsObserver
+}
+
+// StageName returns the configured stage identity.
+func (o *Options) StageName() string {
+	if o == nil {
+		return ""
+	}
+
+	return o.stageName
+}
+
+// ResolveStageName returns the stable stage identity for this operation,
+// generating one when a coordinator is attached and no explicit name was set.
+func (o *Options) ResolveStageName() string {
+	if o == nil {
+		return ""
+	}
+	if o.resolvedStageName != "" {
+		return o.resolvedStageName
+	}
+	if o.stageName != "" {
+		o.resolvedStageName = o.stageName
+		return o.resolvedStageName
+	}
+	if o.coordinator != nil {
+		o.resolvedStageName = o.coordinator.ResolveStageName("")
+	}
+
+	return o.resolvedStageName
+}
+
+// LinkMetricsObserver returns the configured observer for link metrics.
+func (o *Options) LinkMetricsObserver() link.MetricsObserver {
+	if o == nil {
+		return nil
+	}
+
+	return o.linkMetricsObserver
+}
+
+// Coordinator returns the configured pipeline coordinator, if any.
+func (o *Options) Coordinator() *coordinatorinternal.Coordinator {
+	if o == nil {
+		return nil
+	}
+
+	return o.coordinator
+}
+
+// StageBudget returns the configured worker budget for one stage.
+func (o *Options) StageBudget() coordinatorinternal.StageBudget {
+	if o == nil {
+		return coordinatorinternal.StageBudget{}
+	}
+
+	return o.stageBudget
 }

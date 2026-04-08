@@ -6,10 +6,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/ezra-sullivan/flx/pipeline/control"
+	"github.com/ezra-sullivan/flx/pipeline/coordinator"
+	"github.com/ezra-sullivan/flx/pipeline/observe"
 )
 
 func TestStageMapsValues(t *testing.T) {
@@ -63,6 +66,316 @@ func TestStageErrCollectsWorkerErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid syntax") {
 		t.Fatalf("expected strconv error, got %v", err)
+	}
+}
+
+func TestStageMetricsObserverReportsFinalSnapshot(t *testing.T) {
+	observer, snapshots := newStageMetricsObserver()
+
+	items := Stage(
+		t.Context(),
+		Values(1, 2, 3),
+		func(ctx context.Context, item int) int {
+			return item * 10
+		},
+		control.WithWorkers(1),
+		coordinator.WithStageName("multiply"),
+		observe.WithStageMetricsObserver(observer),
+	).Collect()
+
+	if !slices.Equal(items, []int{10, 20, 30}) {
+		t.Fatalf("expected mapped values, got %v", items)
+	}
+
+	got := lastStageMetrics(t, snapshots())
+	want := observe.StageMetrics{
+		StageName:     "multiply",
+		InputCount:    3,
+		OutputCount:   3,
+		ErrorCount:    0,
+		ActiveWorkers: 0,
+		IdleWorkers:   1,
+		Backlog:       0,
+	}
+	if got != want {
+		t.Fatalf("unexpected final stage metrics: got %#v want %#v", got, want)
+	}
+}
+
+func TestLinkMetricsObserverReportsFinalSnapshotAfterFirstDrain(t *testing.T) {
+	observer, snapshots := newLinkMetricsObserver()
+
+	first, ok := Stage(
+		t.Context(),
+		Values(1, 2, 3),
+		func(ctx context.Context, item int) int {
+			return item * 10
+		},
+		control.WithWorkers(1),
+		coordinator.WithStageName("multiply"),
+		observe.WithLinkMetricsObserver(observer),
+	).First()
+
+	if !ok || first != 10 {
+		t.Fatalf("unexpected first result: %d (ok=%v)", first, ok)
+	}
+
+	got := lastLinkMetrics(t, snapshots())
+	want := observe.LinkMetrics{
+		FromStage:     "multiply",
+		SentCount:     3,
+		ReceivedCount: 3,
+		Backlog:       0,
+		Capacity:      1,
+	}
+	if got != want {
+		t.Fatalf("unexpected final link metrics: got %#v want %#v", got, want)
+	}
+}
+
+func TestLinkMetricsObserverReportsDownstreamStageName(t *testing.T) {
+	observer, snapshots := newLinkMetricsObserver()
+
+	items := Stage(
+		t.Context(),
+		Values(1, 2, 3),
+		func(ctx context.Context, item int) int {
+			return item * 10
+		},
+		control.WithWorkers(1),
+		coordinator.WithStageName("download"),
+		observe.WithLinkMetricsObserver(observer),
+	).Through(
+		t.Context(),
+		func(ctx context.Context, item int) int {
+			return item + 1
+		},
+		control.WithWorkers(1),
+		coordinator.WithStageName("resize"),
+	).Collect()
+
+	if !slices.Equal(items, []int{11, 21, 31}) {
+		t.Fatalf("expected chained values, got %v", items)
+	}
+
+	got := lastLinkMetrics(t, snapshots())
+	want := observe.LinkMetrics{
+		FromStage:     "download",
+		ToStage:       "resize",
+		SentCount:     3,
+		ReceivedCount: 3,
+		Backlog:       0,
+		Capacity:      1,
+	}
+	if got != want {
+		t.Fatalf("unexpected final link metrics: got %#v want %#v", got, want)
+	}
+}
+
+func TestPipelineCoordinatorSnapshotCollectsStageLinkAndResourceMetrics(t *testing.T) {
+	pipelineCoordinator := coordinator.NewPipelineCoordinator(
+		coordinator.PipelineCoordinatorPolicy{},
+		coordinator.WithResourceObserver(observe.ResourceObserverFunc(func() observe.ResourceSnapshot {
+			return observe.ResourceSnapshot{
+				Samples: []observe.PressureSample{{
+					Name:  "memory",
+					Level: observe.PressureLevelWarning,
+					Value: 80,
+					Limit: 100,
+				}},
+			}
+		})),
+	)
+
+	items := Stage(
+		t.Context(),
+		Values(1, 2, 3),
+		func(ctx context.Context, item int) int {
+			return item * 10
+		},
+		control.WithWorkers(1),
+		coordinator.WithCoordinator(pipelineCoordinator),
+		coordinator.WithStageName("download"),
+	).Through(
+		t.Context(),
+		func(ctx context.Context, item int) int {
+			return item + 1
+		},
+		control.WithWorkers(1),
+		coordinator.WithCoordinator(pipelineCoordinator),
+		coordinator.WithStageName("resize"),
+	).Collect()
+
+	if !slices.Equal(items, []int{11, 21, 31}) {
+		t.Fatalf("expected chained values, got %v", items)
+	}
+
+	snapshot := pipelineCoordinator.Snapshot()
+	if len(snapshot.Stages) != 2 {
+		t.Fatalf("expected 2 stage snapshots, got %#v", snapshot.Stages)
+	}
+	if len(snapshot.Links) != 2 {
+		t.Fatalf("expected 2 link snapshots, got %#v", snapshot.Links)
+	}
+
+	downloadStage := requireStageSnapshot(t, snapshot, "download")
+	if downloadStage != (observe.StageMetrics{
+		StageName:     "download",
+		InputCount:    3,
+		OutputCount:   3,
+		ErrorCount:    0,
+		ActiveWorkers: 0,
+		IdleWorkers:   1,
+		Backlog:       0,
+	}) {
+		t.Fatalf("unexpected download stage snapshot: %#v", downloadStage)
+	}
+
+	resizeStage := requireStageSnapshot(t, snapshot, "resize")
+	if resizeStage != (observe.StageMetrics{
+		StageName:     "resize",
+		InputCount:    3,
+		OutputCount:   3,
+		ErrorCount:    0,
+		ActiveWorkers: 0,
+		IdleWorkers:   1,
+		Backlog:       0,
+	}) {
+		t.Fatalf("unexpected resize stage snapshot: %#v", resizeStage)
+	}
+
+	downloadLink := requireLinkSnapshot(t, snapshot, "download")
+	if downloadLink != (observe.LinkMetrics{
+		FromStage:     "download",
+		ToStage:       "resize",
+		SentCount:     3,
+		ReceivedCount: 3,
+		Backlog:       0,
+		Capacity:      1,
+	}) {
+		t.Fatalf("unexpected download link snapshot: %#v", downloadLink)
+	}
+
+	resizeLink := requireLinkSnapshot(t, snapshot, "resize")
+	if resizeLink != (observe.LinkMetrics{
+		FromStage:     "resize",
+		ToStage:       "",
+		SentCount:     3,
+		ReceivedCount: 3,
+		Backlog:       0,
+		Capacity:      1,
+	}) {
+		t.Fatalf("unexpected resize link snapshot: %#v", resizeLink)
+	}
+
+	if !slices.Equal(snapshot.Resources.Samples, []observe.PressureSample{{
+		Name:  "memory",
+		Level: observe.PressureLevelWarning,
+		Value: 80,
+		Limit: 100,
+	}}) {
+		t.Fatalf("unexpected resource snapshot: %#v", snapshot.Resources.Samples)
+	}
+}
+
+func TestPipelineCoordinatorCoexistsWithObserveCallbacks(t *testing.T) {
+	pipelineCoordinator := coordinator.NewPipelineCoordinator(coordinator.PipelineCoordinatorPolicy{})
+	stageObserver, stageSnapshots := newStageMetricsObserver()
+	linkObserver, linkSnapshots := newLinkMetricsObserver()
+
+	items := Stage(
+		t.Context(),
+		Values(1, 2, 3),
+		func(ctx context.Context, item int) int {
+			return item * 10
+		},
+		control.WithWorkers(1),
+		coordinator.WithCoordinator(pipelineCoordinator),
+		coordinator.WithStageName("download"),
+		observe.WithStageMetricsObserver(stageObserver),
+		observe.WithLinkMetricsObserver(linkObserver),
+	).Collect()
+
+	if !slices.Equal(items, []int{10, 20, 30}) {
+		t.Fatalf("expected mapped values, got %v", items)
+	}
+	if len(stageSnapshots()) == 0 {
+		t.Fatal("expected stage observer snapshots")
+	}
+	if len(linkSnapshots()) == 0 {
+		t.Fatal("expected link observer snapshots")
+	}
+
+	snapshot := pipelineCoordinator.Snapshot()
+	if got := requireStageSnapshot(t, snapshot, "download"); got.StageName != "download" {
+		t.Fatalf("unexpected coordinator stage snapshot: %#v", got)
+	}
+	if got := requireLinkSnapshot(t, snapshot, "download"); got.FromStage != "download" {
+		t.Fatalf("unexpected coordinator link snapshot: %#v", got)
+	}
+}
+
+func TestPipelineCoordinatorTickExpandsDownstreamDynamicStage(t *testing.T) {
+	pipelineCoordinator := coordinator.NewPipelineCoordinator(coordinator.PipelineCoordinatorPolicy{})
+	downloadCtrl := control.NewConcurrencyController(2)
+	resizeCtrl := control.NewConcurrencyController(1)
+	started := make(chan struct{}, 4)
+	release := make(chan struct{})
+	resultCh := make(chan []int, 1)
+
+	out := Stage(
+		t.Context(),
+		Values(1, 2, 3, 4),
+		func(ctx context.Context, item int) int {
+			return item
+		},
+		control.WithDynamicWorkers(downloadCtrl),
+		coordinator.WithCoordinator(pipelineCoordinator),
+		coordinator.WithStageName("download"),
+		coordinator.WithStageBudget(coordinator.StageBudget{MinWorkers: 1, MaxWorkers: 2}),
+	).Through(
+		t.Context(),
+		func(ctx context.Context, item int) int {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+			return item
+		},
+		control.WithDynamicWorkers(resizeCtrl),
+		coordinator.WithCoordinator(pipelineCoordinator),
+		coordinator.WithStageName("resize"),
+		coordinator.WithStageBudget(coordinator.StageBudget{MinWorkers: 1, MaxWorkers: 3}),
+	)
+
+	go func() {
+		resultCh <- out.Collect()
+	}()
+
+	waitForStarted(t, started, "resize worker start")
+	waitForLinkBacklog(t, pipelineCoordinator, "download", 1)
+
+	decision := pipelineCoordinator.Tick()
+	if got := downloadCtrl.Workers(); got != 2 {
+		t.Fatalf("expected upstream workers to remain 2, got %d", got)
+	}
+	if got := resizeCtrl.Workers(); got != 2 {
+		t.Fatalf("expected downstream workers to scale to 2, got %d", got)
+	}
+	if len(decision.Stages) != 1 {
+		t.Fatalf("expected one stage decision, got %#v", decision.Stages)
+	}
+	if got := decision.Stages[0]; got.StageName != "resize" || got.Reason != "incoming_link_backlog" || got.FromWorkers != 1 || got.ToWorkers != 2 {
+		t.Fatalf("unexpected stage decision: %#v", got)
+	}
+
+	close(release)
+
+	items := waitValue(t, resultCh, "coordinator tick collect")
+	slices.Sort(items)
+	if !slices.Equal(items, []int{1, 2, 3, 4}) {
+		t.Fatalf("unexpected collected values: %v", items)
 	}
 }
 
@@ -131,6 +444,51 @@ func TestFlatStageErrCollectsWorkerErrors(t *testing.T) {
 	}
 	if !errors.Is(err, errBoom) {
 		t.Fatalf("expected error to match %v, got %v", errBoom, err)
+	}
+}
+
+func TestFlatStageErrMetricsObserverReportsFinalSnapshot(t *testing.T) {
+	errBoom := errors.New("boom")
+	observer, snapshots := newStageMetricsObserver()
+
+	out := FlatStageErr(
+		t.Context(),
+		Values(1, 2, 3),
+		func(ctx context.Context, item int, pipe chan<- int) error {
+			if item == 2 {
+				return errBoom
+			}
+
+			pipe <- item
+			pipe <- item * 10
+			return nil
+		},
+		control.WithWorkers(1),
+		control.WithErrorStrategy(control.ErrorStrategyCollect),
+		coordinator.WithStageName("fanout"),
+		observe.WithStageMetricsObserver(observer),
+	)
+
+	items, err := out.CollectErr()
+	if !slices.Equal(items, []int{1, 10, 3, 30}) {
+		t.Fatalf("expected successful items to continue, got %v", items)
+	}
+	if !errors.Is(err, errBoom) {
+		t.Fatalf("expected error to match %v, got %v", errBoom, err)
+	}
+
+	got := lastStageMetrics(t, snapshots())
+	want := observe.StageMetrics{
+		StageName:     "fanout",
+		InputCount:    3,
+		OutputCount:   4,
+		ErrorCount:    1,
+		ActiveWorkers: 0,
+		IdleWorkers:   1,
+		Backlog:       0,
+	}
+	if got != want {
+		t.Fatalf("unexpected final stage metrics: got %#v want %#v", got, want)
 	}
 }
 
@@ -656,9 +1014,125 @@ func waitDone(t *testing.T, done <-chan struct{}, name string) {
 	}
 }
 
+func waitForStarted(t *testing.T, started <-chan struct{}, name string) {
+	t.Helper()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s timed out", name)
+	}
+}
+
+func waitForLinkBacklog(t *testing.T, pipelineCoordinator *coordinator.PipelineCoordinator, fromStage string, minBacklog int) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot := pipelineCoordinator.Snapshot()
+		for _, link := range snapshot.Links {
+			if link.FromStage == fromStage && link.Backlog >= minBacklog {
+				return
+			}
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for link backlog on %q", fromStage)
+}
+
 // groupsEqual compares grouped results while preserving key order and item order.
 func groupsEqual[K comparable, T comparable](got, want []Group[K, T]) bool {
 	return slices.EqualFunc(got, want, func(a, b Group[K, T]) bool {
 		return a.Key == b.Key && slices.Equal(a.Items, b.Items)
 	})
+}
+
+func newStageMetricsObserver() (observe.StageMetricsObserver, func() []observe.StageMetrics) {
+	var (
+		mu        sync.Mutex
+		snapshots []observe.StageMetrics
+	)
+
+	observer := func(snapshot observe.StageMetrics) {
+		mu.Lock()
+		snapshots = append(snapshots, snapshot)
+		mu.Unlock()
+	}
+
+	return observer, func() []observe.StageMetrics {
+		mu.Lock()
+		defer mu.Unlock()
+
+		return append([]observe.StageMetrics(nil), snapshots...)
+	}
+}
+
+func lastStageMetrics(t *testing.T, snapshots []observe.StageMetrics) observe.StageMetrics {
+	t.Helper()
+
+	if len(snapshots) == 0 {
+		t.Fatal("expected at least one stage metrics snapshot")
+	}
+
+	return snapshots[len(snapshots)-1]
+}
+
+func newLinkMetricsObserver() (observe.LinkMetricsObserver, func() []observe.LinkMetrics) {
+	var (
+		mu        sync.Mutex
+		snapshots []observe.LinkMetrics
+	)
+
+	observer := func(snapshot observe.LinkMetrics) {
+		mu.Lock()
+		snapshots = append(snapshots, snapshot)
+		mu.Unlock()
+	}
+
+	return observer, func() []observe.LinkMetrics {
+		mu.Lock()
+		defer mu.Unlock()
+
+		return append([]observe.LinkMetrics(nil), snapshots...)
+	}
+}
+
+func lastLinkMetrics(t *testing.T, snapshots []observe.LinkMetrics) observe.LinkMetrics {
+	t.Helper()
+
+	if len(snapshots) == 0 {
+		t.Fatal("expected at least one link metrics snapshot")
+	}
+
+	return snapshots[len(snapshots)-1]
+}
+
+func requireStageSnapshot(t *testing.T, snapshot observe.PipelineSnapshot, stageName string) observe.StageMetrics {
+	t.Helper()
+
+	for _, stage := range snapshot.Stages {
+		if stage.StageName == stageName {
+			return stage
+		}
+	}
+
+	t.Fatalf("expected stage snapshot %q in %#v", stageName, snapshot.Stages)
+
+	return observe.StageMetrics{}
+}
+
+func requireLinkSnapshot(t *testing.T, snapshot observe.PipelineSnapshot, fromStage string) observe.LinkMetrics {
+	t.Helper()
+
+	for _, link := range snapshot.Links {
+		if link.FromStage == fromStage {
+			return link
+		}
+	}
+
+	t.Fatalf("expected link snapshot %q in %#v", fromStage, snapshot.Links)
+
+	return observe.LinkMetrics{}
 }

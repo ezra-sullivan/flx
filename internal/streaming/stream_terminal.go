@@ -22,31 +22,35 @@ func (s Stream[T]) maybePanicOnErr() {
 
 func (s Stream[T]) shortCircuitErr() error {
 	err := s.Err()
-	go drain(s.source)
+	go s.drainSource()
 	return err
 }
 
 func (s Stream[T]) drainAndMaybePanic() {
-	drain(s.source)
+	s.drainSource()
 	s.maybePanicOnErr()
 }
 
 // Done drains the stream and panics if a fail-fast error was recorded.
 func (s Stream[T]) Done() {
-	drain(s.source)
+	s.drainSource()
 	s.maybePanicOnErr()
 }
 
 // DoneErr drains the stream and returns the final error state.
 func (s Stream[T]) DoneErr() error {
-	drain(s.source)
+	s.drainSource()
 	return s.Err()
 }
 
 // ForEach calls fn for every item in the stream and panics if a fail-fast error
 // was recorded.
 func (s Stream[T]) ForEach(fn func(T)) {
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		fn(item)
 	}
 	s.maybePanicOnErr()
@@ -55,7 +59,11 @@ func (s Stream[T]) ForEach(fn func(T)) {
 // ForEachErr calls fn for every item in the stream and returns the final error
 // state.
 func (s Stream[T]) ForEachErr(fn func(T)) error {
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		fn(item)
 	}
 	return s.Err()
@@ -64,16 +72,14 @@ func (s Stream[T]) ForEachErr(fn func(T)) error {
 // ForAll hands the raw source channel to fn, then drains any leftovers and
 // applies fail-fast panic behavior.
 func (s Stream[T]) ForAll(fn func(<-chan T)) {
-	fn(s.source)
-	drain(s.source)
+	s.withObservedSource(fn)
 	s.maybePanicOnErr()
 }
 
 // ForAllErr hands the raw source channel to fn, then drains any leftovers and
 // returns the final error state.
 func (s Stream[T]) ForAllErr(fn func(<-chan T)) error {
-	fn(s.source)
-	drain(s.source)
+	s.withObservedSource(fn)
 	return s.Err()
 }
 
@@ -98,7 +104,10 @@ func (s Stream[T]) ParallelErr(fn func(T) error, opts ...Option) error {
 
 // Count drains the stream and returns the number of items it produced.
 func (s Stream[T]) Count() (count int) {
-	for range s.source {
+	for {
+		if _, ok := s.next(); !ok {
+			break
+		}
 		count++
 	}
 	s.maybePanicOnErr()
@@ -109,7 +118,10 @@ func (s Stream[T]) Count() (count int) {
 // error state.
 func (s Stream[T]) CountErr() (int, error) {
 	var count int
-	for range s.source {
+	for {
+		if _, ok := s.next(); !ok {
+			break
+		}
 		count++
 	}
 	return count, s.Err()
@@ -127,7 +139,11 @@ func (s Stream[T]) Collect() []T {
 // CollectErr drains the stream into a slice and returns the final error state.
 func (s Stream[T]) CollectErr() ([]T, error) {
 	var items []T
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		items = append(items, item)
 	}
 	return items, s.Err()
@@ -136,7 +152,11 @@ func (s Stream[T]) CollectErr() ([]T, error) {
 // First returns the first item and then drains the rest of the stream so any
 // delayed fail-fast error is observed before the call returns.
 func (s Stream[T]) First() (T, bool) {
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		s.drainAndMaybePanic()
 		return item, true
 	}
@@ -149,7 +169,11 @@ func (s Stream[T]) First() (T, bool) {
 // FirstErr returns the first item and the current error state, then drains the
 // remaining source asynchronously.
 func (s Stream[T]) FirstErr() (T, bool, error) {
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		return item, true, s.shortCircuitErr()
 	}
 
@@ -163,7 +187,11 @@ func (s Stream[T]) Last() (T, bool) {
 		last T
 		ok   bool
 	)
-	for item := range s.source {
+	for {
+		item, more := s.next()
+		if !more {
+			break
+		}
 		last = item
 		ok = true
 	}
@@ -178,7 +206,11 @@ func (s Stream[T]) LastErr() (T, bool, error) {
 		last T
 		ok   bool
 	)
-	for item := range s.source {
+	for {
+		item, more := s.next()
+		if !more {
+			break
+		}
 		last = item
 		ok = true
 	}
@@ -189,7 +221,11 @@ func (s Stream[T]) LastErr() (T, bool, error) {
 // remainder of the stream after the first mismatch so delayed fail-fast errors
 // can still surface.
 func (s Stream[T]) AllMatch(predicate func(T) bool) bool {
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		if !predicate(item) {
 			s.drainAndMaybePanic()
 			return false
@@ -203,7 +239,11 @@ func (s Stream[T]) AllMatch(predicate func(T) bool) bool {
 // AllMatchErr reports whether every item satisfies predicate and returns the
 // current error state when it short-circuits.
 func (s Stream[T]) AllMatchErr(predicate func(T) bool) (bool, error) {
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		if !predicate(item) {
 			return false, s.shortCircuitErr()
 		}
@@ -215,7 +255,11 @@ func (s Stream[T]) AllMatchErr(predicate func(T) bool) (bool, error) {
 // remainder of the stream after the first match so delayed fail-fast errors can
 // still surface.
 func (s Stream[T]) AnyMatch(predicate func(T) bool) bool {
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		if predicate(item) {
 			s.drainAndMaybePanic()
 			return true
@@ -229,7 +273,11 @@ func (s Stream[T]) AnyMatch(predicate func(T) bool) bool {
 // AnyMatchErr reports whether any item satisfies predicate and returns the
 // current error state when it short-circuits.
 func (s Stream[T]) AnyMatchErr(predicate func(T) bool) (bool, error) {
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		if predicate(item) {
 			return true, s.shortCircuitErr()
 		}
@@ -241,7 +289,11 @@ func (s Stream[T]) AnyMatchErr(predicate func(T) bool) (bool, error) {
 // remainder of the stream after the first match so delayed fail-fast errors can
 // still surface.
 func (s Stream[T]) NoneMatch(predicate func(T) bool) bool {
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		if predicate(item) {
 			s.drainAndMaybePanic()
 			return false
@@ -255,7 +307,11 @@ func (s Stream[T]) NoneMatch(predicate func(T) bool) bool {
 // NoneMatchErr reports whether no item satisfies predicate and returns the
 // current error state when it short-circuits.
 func (s Stream[T]) NoneMatchErr(predicate func(T) bool) (bool, error) {
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		if predicate(item) {
 			return false, s.shortCircuitErr()
 		}
@@ -269,7 +325,11 @@ func (s Stream[T]) Max(less func(T, T) bool) (T, bool) {
 		best T
 		ok   bool
 	)
-	for item := range s.source {
+	for {
+		item, more := s.next()
+		if !more {
+			break
+		}
 		if !ok || less(best, item) {
 			best = item
 			ok = true
@@ -286,7 +346,11 @@ func (s Stream[T]) MaxErr(less func(T, T) bool) (T, bool, error) {
 		best T
 		ok   bool
 	)
-	for item := range s.source {
+	for {
+		item, more := s.next()
+		if !more {
+			break
+		}
 		if !ok || less(best, item) {
 			best = item
 			ok = true
@@ -301,7 +365,11 @@ func (s Stream[T]) Min(less func(T, T) bool) (T, bool) {
 		best T
 		ok   bool
 	)
-	for item := range s.source {
+	for {
+		item, more := s.next()
+		if !more {
+			break
+		}
 		if !ok || less(item, best) {
 			best = item
 			ok = true
@@ -318,7 +386,11 @@ func (s Stream[T]) MinErr(less func(T, T) bool) (T, bool, error) {
 		best T
 		ok   bool
 	)
-	for item := range s.source {
+	for {
+		item, more := s.next()
+		if !more {
+			break
+		}
 		if !ok || less(item, best) {
 			best = item
 			ok = true

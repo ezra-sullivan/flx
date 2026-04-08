@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/ezra-sullivan/flx/internal/config"
+	linkinternal "github.com/ezra-sullivan/flx/internal/link"
+	"github.com/ezra-sullivan/flx/internal/metrics"
 	rt "github.com/ezra-sullivan/flx/internal/runtime"
 	"github.com/ezra-sullivan/flx/internal/state"
 )
@@ -114,7 +116,11 @@ func DistinctBy[T any, K comparable](s Stream[T], fn func(T) K) Stream[T] {
 		defer close(source)
 		if err := rt.RunSafeFunc(func() error {
 			keys := make(map[K]struct{})
-			for item := range s.source {
+			for {
+				item, ok := s.next()
+				if !ok {
+					break
+				}
 				key := fn(item)
 				if _, ok := keys[key]; ok {
 					continue
@@ -125,7 +131,7 @@ func DistinctBy[T any, K comparable](s Stream[T], fn func(T) K) Stream[T] {
 			return nil
 		}); err != nil {
 			s.state.Add(err, true)
-			go drain(s.source)
+			go s.drainSource()
 		}
 	}()
 
@@ -142,7 +148,11 @@ func DistinctByCount[T any, K comparable](s Stream[T], n int, fn func(T) K) Stre
 		if err := rt.RunSafeFunc(func() error {
 			count := 0
 			seen := make(map[K]struct{})
-			for item := range s.source {
+			for {
+				item, ok := s.next()
+				if !ok {
+					break
+				}
 				if count == n {
 					count = 0
 					seen = make(map[K]struct{})
@@ -159,7 +169,7 @@ func DistinctByCount[T any, K comparable](s Stream[T], n int, fn func(T) K) Stre
 			return nil
 		}); err != nil {
 			s.state.Add(err, true)
-			go drain(s.source)
+			go s.drainSource()
 		}
 	}()
 
@@ -171,7 +181,11 @@ func DistinctByCount[T any, K comparable](s Stream[T], n int, fn func(T) K) Stre
 func GroupBy[T any, K comparable](s Stream[T], fn func(T) K) Stream[[]T] {
 	groups := make(map[K][]T)
 	order := make([]K, 0)
-	for item := range s.source {
+	for {
+		item, ok := s.next()
+		if !ok {
+			break
+		}
 		key := fn(item)
 		if _, ok := groups[key]; !ok {
 			order = append(order, key)
@@ -211,7 +225,11 @@ func GroupByCount[T any, K comparable](s Stream[T], n int, fn func(T) K) Stream[
 				order = nil
 			}
 
-			for item := range s.source {
+			for {
+				item, ok := s.next()
+				if !ok {
+					break
+				}
 				if count == n {
 					flush()
 				}
@@ -230,7 +248,7 @@ func GroupByCount[T any, K comparable](s Stream[T], n int, fn func(T) K) Stream[
 			return nil
 		}); err != nil {
 			s.state.Add(err, true)
-			go drain(s.source)
+			go s.drainSource()
 		}
 	}()
 
@@ -267,15 +285,17 @@ func DistinctByWindow[T any, K comparable](ctx context.Context, s Stream[T], eve
 				select {
 				case <-ctx.Done():
 					stopWindow()
-					go drain(s.source)
+					go s.drainSource()
 					return nil
 				case <-tick:
 					stopWindow()
 				case item, ok := <-s.source:
 					if !ok {
+						s.closeLink()
 						stopWindow()
 						return nil
 					}
+					s.observeLinkReceive()
 
 					if seen == nil {
 						startWindow()
@@ -289,14 +309,14 @@ func DistinctByWindow[T any, K comparable](ctx context.Context, s Stream[T], eve
 					seen[key] = struct{}{}
 					if !SendContext(ctx, source, item) {
 						stopWindow()
-						go drain(s.source)
+						go s.drainSource()
 						return nil
 					}
 				}
 			}
 		}); err != nil {
 			s.state.Add(err, true)
-			go drain(s.source)
+			go s.drainSource()
 		}
 	}()
 
@@ -352,20 +372,22 @@ func GroupByWindow[T any, K comparable](ctx context.Context, s Stream[T], every 
 				select {
 				case <-ctx.Done():
 					stopWindow()
-					go drain(s.source)
+					go s.drainSource()
 					return nil
 				case <-tick:
 					if !flush() {
-						go drain(s.source)
+						go s.drainSource()
 						return nil
 					}
 				case item, ok := <-s.source:
 					if !ok {
+						s.closeLink()
 						if !flush() {
-							go drain(s.source)
+							go s.drainSource()
 						}
 						return nil
 					}
+					s.observeLinkReceive()
 
 					if groups == nil {
 						startWindow()
@@ -380,7 +402,7 @@ func GroupByWindow[T any, K comparable](ctx context.Context, s Stream[T], every 
 			}
 		}); err != nil {
 			s.state.Add(err, true)
-			go drain(s.source)
+			go s.drainSource()
 		}
 	}()
 
@@ -397,7 +419,11 @@ func Chunk[T any](s Stream[T], n int) Stream[[]T] {
 	source := make(chan []T)
 	go func() {
 		var chunk []T
-		for item := range s.source {
+		for {
+			item, ok := s.next()
+			if !ok {
+				break
+			}
 			chunk = append(chunk, item)
 			if len(chunk) == n {
 				source <- chunk
@@ -416,8 +442,7 @@ func Chunk[T any](s Stream[T], n int) Stream[[]T] {
 // Reduce hands s's source channel to fn, drains any remaining items after fn
 // returns, and joins fn's returned error with the stream error state.
 func Reduce[T, R any](s Stream[T], fn func(<-chan T) (R, error)) (R, error) {
-	result, err := fn(s.source)
-	drain(s.source)
+	result, err := withObservedSourceResult(s, fn)
 	return result, errors.Join(err, s.Err())
 }
 
@@ -435,6 +460,8 @@ func stopTimer(timer *time.Timer) {
 
 func transformErr[T, U any](s Stream[T], fn func(T, chan<- U) error, opts ...Option) Stream[U] {
 	options := config.BuildOptions(opts...)
+	stageName := options.ResolveStageName()
+	s.setLinkDownstreamStage(stageName)
 	if options.Interruptible() {
 		panic(config.ErrInterruptibleWorkersRequireContextTransform)
 	}
@@ -443,59 +470,125 @@ func transformErr[T, U any](s Stream[T], fn func(T, chan<- U) error, opts ...Opt
 	case options.Unlimited():
 		return walkUnlimited[T, U](nil, s, func(_ context.Context, item T, pipe chan<- U) error {
 			return fn(item, pipe)
-		}, options)
+		}, options, stageName)
 	case options.Controller() != nil:
 		return walkDynamic[T, U](nil, s, func(_ context.Context, item T, pipe chan<- U) error {
 			return fn(item, pipe)
-		}, options)
+		}, options, stageName)
 	default:
 		return walkLimited[T, U](nil, s, func(_ context.Context, item T, pipe chan<- U) error {
 			return fn(item, pipe)
-		}, options)
+		}, options, stageName)
 	}
 }
 
 func transformContextErr[T, U any](ctx context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, opts ...Option) Stream[U] {
 	options := config.BuildOptions(opts...)
+	stageName := options.ResolveStageName()
+	s.setLinkDownstreamStage(stageName)
 
 	switch {
 	case options.Unlimited():
-		return walkUnlimited(ctx, s, fn, options)
+		return walkUnlimited(ctx, s, fn, options, stageName)
 	case options.Controller() != nil && options.Interruptible():
-		return walkInterruptible(ctx, s, fn, options)
+		return walkInterruptible(ctx, s, fn, options, stageName)
 	case options.Controller() != nil:
-		return walkDynamic(ctx, s, fn, options)
+		return walkDynamic(ctx, s, fn, options, stageName)
 	default:
-		return walkLimited(ctx, s, fn, options)
+		return walkLimited(ctx, s, fn, options, stageName)
 	}
 }
 
-func walkLimited[T, U any](parent context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, option *config.Options) Stream[U] {
+func walkLimited[T, U any](parent context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, option *config.Options, stageName string) Stream[U] {
+	tracker := newStageMetricsTracker(option, stageName, func() int {
+		return option.Workers()
+	})
+	linkMeter := newLinkMeter(option, stageName, option.Workers())
 	pipe := rt.WalkLimited(parent, s.source, option.Workers(), newWalkerOperation(s.state, option.ErrorStrategy()), fn, func() {
-		go drain(s.source)
-	})
-	return WithState(pipe, s.state)
+		go s.drainSource()
+	}, tracker, linkMeter, s.observeLinkReceive, s.closeLink)
+	return WithStateAndLink(pipe, s.state, linkMeter)
 }
 
-func walkUnlimited[T, U any](parent context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, option *config.Options) Stream[U] {
+func walkUnlimited[T, U any](parent context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, option *config.Options, stageName string) Stream[U] {
+	tracker := newStageMetricsTracker(option, stageName, nil)
+	linkMeter := newLinkMeter(option, stageName, config.UnlimitedWorkerBuffer)
 	pipe := rt.WalkUnlimited(parent, s.source, config.UnlimitedWorkerBuffer, newWalkerOperation(s.state, option.ErrorStrategy()), fn, func() {
-		go drain(s.source)
-	})
-	return WithState(pipe, s.state)
+		go s.drainSource()
+	}, tracker, linkMeter, s.observeLinkReceive, s.closeLink)
+	return WithStateAndLink(pipe, s.state, linkMeter)
 }
 
-func walkDynamic[T, U any](parent context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, option *config.Options) Stream[U] {
+func walkDynamic[T, U any](parent context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, option *config.Options, stageName string) Stream[U] {
+	registerControllableStage(option, stageName)
+	tracker := newStageMetricsTracker(option, stageName, func() int {
+		return option.Controller().Workers()
+	})
+	linkMeter := newLinkMeter(option, stageName, option.Controller().Workers())
 	pipe := rt.WalkDynamic(parent, s.source, option.Controller(), newWalkerOperation(s.state, option.ErrorStrategy()), fn, func() {
-		go drain(s.source)
-	})
-	return WithState(pipe, s.state)
+		go s.drainSource()
+	}, tracker, linkMeter, s.observeLinkReceive, s.closeLink)
+	return WithStateAndLink(pipe, s.state, linkMeter)
 }
 
-func walkInterruptible[T, U any](parent context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, option *config.Options) Stream[U] {
-	pipe := rt.WalkInterruptible(parent, s.source, option.Controller(), newWalkerOperation(s.state, option.ErrorStrategy()), fn, func() {
-		go drain(s.source)
+func walkInterruptible[T, U any](parent context.Context, s Stream[T], fn func(context.Context, T, chan<- U) error, option *config.Options, stageName string) Stream[U] {
+	registerControllableStage(option, stageName)
+	tracker := newStageMetricsTracker(option, stageName, func() int {
+		return option.Controller().Workers()
 	})
-	return WithState(pipe, s.state)
+	linkMeter := newLinkMeter(option, stageName, option.Controller().Workers())
+	pipe := rt.WalkInterruptible(parent, s.source, option.Controller(), newWalkerOperation(s.state, option.ErrorStrategy()), fn, func() {
+		go s.drainSource()
+	}, tracker, linkMeter, s.observeLinkReceive, s.closeLink)
+	return WithStateAndLink(pipe, s.state, linkMeter)
+}
+
+func newStageMetricsTracker(option *config.Options, stageName string, workerCapacity func() int) *metrics.StageTracker {
+	return metrics.NewStageTracker(stageName, composeStageMetricsObserver(option), workerCapacity)
+}
+
+func newLinkMeter(option *config.Options, stageName string, capacity int) *linkinternal.Meter {
+	return linkinternal.NewMeter(stageName, capacity, composeLinkMetricsObserver(option))
+}
+
+func composeStageMetricsObserver(option *config.Options) metrics.StageMetricsObserver {
+	observer := option.StageMetricsObserver()
+	coord := option.Coordinator()
+	if coord == nil {
+		return observer
+	}
+	if observer == nil {
+		return coord.ObserveStage
+	}
+
+	return func(snapshot metrics.StageMetrics) {
+		coord.ObserveStage(snapshot)
+		observer(snapshot)
+	}
+}
+
+func composeLinkMetricsObserver(option *config.Options) linkinternal.MetricsObserver {
+	observer := option.LinkMetricsObserver()
+	coord := option.Coordinator()
+	if coord == nil {
+		return observer
+	}
+	if observer == nil {
+		return coord.ObserveLink
+	}
+
+	return func(snapshot linkinternal.Metrics) {
+		coord.ObserveLink(snapshot)
+		observer(snapshot)
+	}
+}
+
+func registerControllableStage(option *config.Options, stageName string) {
+	if option == nil || option.Coordinator() == nil || option.Controller() == nil {
+		return
+	}
+
+	option.Coordinator().RegisterControllableStage(stageName, option.Controller(), option.StageBudget())
 }
 
 func newWalkerOperation(handle state.Handle, strategy config.ErrorStrategy) rt.NewOperationFunc {

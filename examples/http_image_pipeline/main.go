@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ezra-sullivan/flx/pipeline/control"
@@ -11,10 +13,12 @@ import (
 
 // main wires together a small end-to-end demo that lists remote images,
 // applies a resize stage with dynamic concurrency, adds a watermark, and can
-// optionally upload the final bytes. The configuration intentionally stays
-// small so the example is easy to run locally while still showing retries,
-// stage boundaries, and output artifacts.
+// optionally upload the final bytes. Use -mode to compare the plain Stage DSL,
+// the lower-level native assembly, and the coordinator-attached variant.
 func main() {
+	mode := flag.String("mode", "coordinator", "pipeline mode: coordinator, stage, or native")
+	flag.Parse()
+
 	ctx := context.Background()
 
 	sourceHTTPClient := &http.Client{Timeout: 15 * time.Second}
@@ -57,13 +61,19 @@ func main() {
 		// UploadEndpoint: "https://target.example.com/api/upload",
 	}
 
-	if err := RunStagePipeline(ctx, sourceHTTPClient, targetHTTPClient, cfg, resizeController); err != nil {
-		log.Fatal(err)
+	var err error
+	switch strings.ToLower(strings.TrimSpace(*mode)) {
+	case "coordinator":
+		err = RunCoordinatorPipeline(ctx, sourceHTTPClient, targetHTTPClient, cfg, resizeController)
+	case "stage":
+		err = RunStagePipeline(ctx, sourceHTTPClient, targetHTTPClient, cfg, resizeController)
+	case "native":
+		err = RunNativePipeline(ctx, sourceHTTPClient, targetHTTPClient, cfg, resizeController)
+	default:
+		log.Fatalf("unsupported mode %q; expected coordinator, stage, or native", *mode)
 	}
 
-	// Uncomment this path to compare the more explicit inline-pipeline version
-	// against the Stage-oriented pipeline above.
-	// if err := RunNativePipeline(ctx, sourceHTTPClient, targetHTTPClient, cfg, resizeController); err != nil {
-	// 	log.Fatal(err)
-	// }
+	if err != nil {
+		log.Fatal(err)
+	}
 }
