@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ezra-sullivan/flx"
+	imgproc "github.com/ezra-sullivan/flx/examples/internal/imgproc"
 	"github.com/ezra-sullivan/flx/pipeline/control"
 )
 
@@ -18,12 +19,13 @@ func RunNativePipeline(
 	ctx context.Context,
 	sourceHTTPClient *http.Client,
 	targetHTTPClient *http.Client,
-	cfg PipelineConfig,
+	cfg imgproc.PipelineConfig,
 	resizeController *control.ConcurrencyController,
 ) error {
 	// Native version: build the source stage inline with flx.From so the reader
-	// can inspect the exact listing logic without additional indirection.
-	listedImages := flx.From(func(out chan<- RemoteImage) {
+	// can inspect the exact local-catalog listing logic without additional
+	// indirection.
+	listedImages := flx.From(func(out chan<- imgproc.RemoteImage) {
 		pageSize := cfg.ListPageSize
 		if pageSize <= 0 {
 			pageSize = 10
@@ -44,7 +46,7 @@ func RunNativePipeline(
 				return
 			}
 
-			photos, err := fetchPicsumPage(ctx, sourceHTTPClient, cfg.ListEndpoint, page, pageSize)
+			photos, err := imgproc.FetchImageCatalogPage(ctx, sourceHTTPClient, cfg.ListEndpoint, page, pageSize)
 			if err != nil {
 				panic(fmt.Errorf("list images page=%d: %w", page, err))
 			}
@@ -54,9 +56,9 @@ func RunNativePipeline(
 			}
 
 			for _, photo := range photos {
-				image := RemoteImage{
+				image := imgproc.RemoteImage{
 					ID:        photo.ID,
-					SourceURL: buildPicsumImageURL(photo.ID, downloadWidth, downloadHeight),
+					SourceURL: imgproc.BuildImageDownloadURL(photo.ID, downloadWidth, downloadHeight),
 				}
 				if !flx.SendContext(ctx, out, image) {
 					return
@@ -73,22 +75,23 @@ func RunNativePipeline(
 	// once and let each save stage focus on persistence rather than config checks.
 	shouldSaveLocal := strings.TrimSpace(cfg.LocalOutputDir) != ""
 
-	// Stage 1 downloads bytes and converts network failures into item-level
-	// errors so later stages can continue processing unaffected images.
+	// Stage 1 downloads bytes and converts item-scoped transport failures into
+	// item-level errors so later stages can continue processing unaffected
+	// images.
 	images := flx.MapContext(
 		ctx,
 		listedImages,
-		func(ctx context.Context, image RemoteImage) ImageResult[[]byte] {
-			imageBytes, err := downloadImageWithRetry(ctx, sourceHTTPClient, image.SourceURL, cfg)
+		func(ctx context.Context, image imgproc.RemoteImage) imgproc.ImageResult[[]byte] {
+			imageBytes, err := imgproc.DownloadImageWithRetry(ctx, sourceHTTPClient, image, cfg)
 			if err != nil {
-				return ImageResult[[]byte]{
+				return imgproc.ImageResult[[]byte]{
 					ImageID:   image.ID,
 					SourceURL: image.SourceURL,
 					Err:       fmt.Errorf("download %s: %w", image.SourceURL, err),
 				}
 			}
 
-			return ImageResult[[]byte]{
+			return imgproc.ImageResult[[]byte]{
 				ImageID:   image.ID,
 				SourceURL: image.SourceURL,
 				Value:     imageBytes,
@@ -102,13 +105,13 @@ func RunNativePipeline(
 	images = flx.MapContext(
 		ctx,
 		images,
-		func(ctx context.Context, image ImageResult[[]byte]) ImageResult[[]byte] {
+		func(ctx context.Context, image imgproc.ImageResult[[]byte]) imgproc.ImageResult[[]byte] {
 			if image.Err != nil || !shouldSaveLocal {
 				return image
 			}
 
-			if err := saveImageBytes(cfg.LocalOutputDir, "original", image); err != nil {
-				return ImageResult[[]byte]{
+			if err := imgproc.SaveImageBytes(cfg.LocalOutputDir, "original", image); err != nil {
+				return imgproc.ImageResult[[]byte]{
 					ImageID:   image.ImageID,
 					SourceURL: image.SourceURL,
 					Err:       fmt.Errorf("save original image %s: %w", image.SourceURL, err),
@@ -125,21 +128,21 @@ func RunNativePipeline(
 	images = flx.MapContext(
 		ctx,
 		images,
-		func(ctx context.Context, image ImageResult[[]byte]) ImageResult[[]byte] {
+		func(ctx context.Context, image imgproc.ImageResult[[]byte]) imgproc.ImageResult[[]byte] {
 			if image.Err != nil {
 				return image
 			}
 
-			nextBytes, err := ResizeTo(cfg.ResizeWidth, cfg.ResizeHeight)(ctx, image.SourceURL, image.Value)
+			nextBytes, err := imgproc.ResizeTo(cfg.ResizeWidth, cfg.ResizeHeight)(ctx, image.SourceURL, image.Value)
 			if err != nil {
-				return ImageResult[[]byte]{
+				return imgproc.ImageResult[[]byte]{
 					ImageID:   image.ImageID,
 					SourceURL: image.SourceURL,
 					Err:       err,
 				}
 			}
 
-			return ImageResult[[]byte]{
+			return imgproc.ImageResult[[]byte]{
 				ImageID:   image.ImageID,
 				SourceURL: image.SourceURL,
 				Value:     nextBytes,
@@ -153,21 +156,21 @@ func RunNativePipeline(
 	images = flx.MapContext(
 		ctx,
 		images,
-		func(ctx context.Context, image ImageResult[[]byte]) ImageResult[[]byte] {
+		func(ctx context.Context, image imgproc.ImageResult[[]byte]) imgproc.ImageResult[[]byte] {
 			if image.Err != nil {
 				return image
 			}
 
-			nextBytes, err := AddWatermarkText(cfg.WatermarkText)(ctx, image.SourceURL, image.Value)
+			nextBytes, err := imgproc.AddWatermarkText(cfg.WatermarkText)(ctx, image.SourceURL, image.Value)
 			if err != nil {
-				return ImageResult[[]byte]{
+				return imgproc.ImageResult[[]byte]{
 					ImageID:   image.ImageID,
 					SourceURL: image.SourceURL,
 					Err:       err,
 				}
 			}
 
-			return ImageResult[[]byte]{
+			return imgproc.ImageResult[[]byte]{
 				ImageID:   image.ImageID,
 				SourceURL: image.SourceURL,
 				Value:     nextBytes,
@@ -181,13 +184,13 @@ func RunNativePipeline(
 	images = flx.MapContext(
 		ctx,
 		images,
-		func(ctx context.Context, image ImageResult[[]byte]) ImageResult[[]byte] {
+		func(ctx context.Context, image imgproc.ImageResult[[]byte]) imgproc.ImageResult[[]byte] {
 			if image.Err != nil || !shouldSaveLocal {
 				return image
 			}
 
-			if err := saveImageBytes(cfg.LocalOutputDir, "processed", image); err != nil {
-				return ImageResult[[]byte]{
+			if err := imgproc.SaveImageBytes(cfg.LocalOutputDir, "processed", image); err != nil {
+				return imgproc.ImageResult[[]byte]{
 					ImageID:   image.ImageID,
 					SourceURL: image.SourceURL,
 					Err:       fmt.Errorf("save processed image %s: %w", image.SourceURL, err),
@@ -202,22 +205,22 @@ func RunNativePipeline(
 	// No upload endpoint configured: stop after local processing and let the sink
 	// summarize both successful and failed item outcomes.
 	if cfg.UploadEndpoint == "" {
-		return consumeProcessedImages(images)
+		return imgproc.ConsumeProcessedImages(images)
 	}
 
 	results := flx.MapContext(
 		ctx,
 		images,
-		func(ctx context.Context, image ImageResult[[]byte]) ImageResult[string] {
+		func(ctx context.Context, image imgproc.ImageResult[[]byte]) imgproc.ImageResult[string] {
 			if image.Err != nil {
-				return ImageResult[string]{
+				return imgproc.ImageResult[string]{
 					ImageID:   image.ImageID,
 					SourceURL: image.SourceURL,
 					Err:       image.Err,
 				}
 			}
 
-			postedURL, err := postImage(
+			postedURL, err := imgproc.PostImage(
 				ctx,
 				targetHTTPClient,
 				cfg.UploadEndpoint,
@@ -225,14 +228,14 @@ func RunNativePipeline(
 				image.Value,
 			)
 			if err != nil {
-				return ImageResult[string]{
+				return imgproc.ImageResult[string]{
 					ImageID:   image.ImageID,
 					SourceURL: image.SourceURL,
 					Err:       fmt.Errorf("post image %s: %w", image.SourceURL, err),
 				}
 			}
 
-			return ImageResult[string]{
+			return imgproc.ImageResult[string]{
 				ImageID:   image.ImageID,
 				SourceURL: image.SourceURL,
 				Value:     postedURL,
@@ -241,5 +244,5 @@ func RunNativePipeline(
 		control.WithWorkers(cfg.UploadWorkers),
 	)
 
-	return consumeUploadedImages(results)
+	return imgproc.ConsumeUploadedImages(results)
 }

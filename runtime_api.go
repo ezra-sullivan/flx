@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -44,11 +43,32 @@ var (
 	ErrRetryAttemptTimeout = errors.New("flx: retry attempt timeout")
 )
 
-// TimeoutOption supplies the parent context for a timeout call.
-type TimeoutOption func() context.Context
+// TimeoutOption mutates the behavior of one timeout call.
+type TimeoutOption func(*timeoutOptions)
 
 // RetryOption mutates the behavior of one retry call.
 type RetryOption func(*retryOptions)
+
+// RetryEvent describes one failed attempt that will be retried. Attempt fields
+// describe overall attempts including the first try, while Retry fields
+// describe the upcoming retry ordinal only.
+type RetryEvent struct {
+	Attempt     int
+	MaxAttempts int
+	Retry       int
+	MaxRetries  int
+	NextAttempt int
+	NextDelay   time.Duration
+	Err         error
+}
+
+// TimeoutLatePanicEvent reports a panic that happened after DoWithTimeout or
+// DoWithTimeoutCtx had already returned, so the panic could not be rethrown to
+// the finished caller anymore.
+type TimeoutLatePanicEvent struct {
+	Panic any
+	Stack string
+}
 
 // retryOptions stores the validated settings for one retry loop.
 type retryOptions struct {
@@ -57,6 +77,13 @@ type retryOptions struct {
 	timeout        time.Duration
 	attemptTimeout time.Duration
 	ignoreErrors   []error
+	onRetry        func(RetryEvent)
+}
+
+// timeoutOptions stores the validated settings for one timeout call.
+type timeoutOptions struct {
+	parentContext     context.Context
+	latePanicObserver func(TimeoutLatePanicEvent)
 }
 
 // Parallel runs each function in its own goroutine and panics if the chosen
@@ -74,7 +101,7 @@ func ParallelWithErrorStrategy(strategy control.ErrorStrategy, fns ...func()) er
 
 	streamState := state.NewStream()
 	var op *rt.OperationController
-	op = rt.NewOperationController(nil, func(err error) {
+	op = rt.NewOperationController(context.Background(), func(err error) {
 		if err == nil {
 			return
 		}
@@ -84,8 +111,7 @@ func ParallelWithErrorStrategy(strategy control.ErrorStrategy, fns ...func()) er
 		switch strategy {
 		case control.ErrorStrategyCollect:
 			streamState.Add(err, false)
-		case control.ErrorStrategyLogAndContinue:
-			log.Printf("[flx] worker error: %v", err)
+		case control.ErrorStrategyContinue:
 		case control.ErrorStrategyFailFast:
 			streamState.Add(err, true)
 			op.Cancel(err)
@@ -212,12 +238,34 @@ func retry(ctx context.Context, cooperative bool, fn func(context.Context, int) 
 				return nil
 			}
 			errs.Add(err)
+			if attempt+1 < options.times {
+				notifyRetry(options.onRetry, RetryEvent{
+					Attempt:     attempt + 1,
+					MaxAttempts: options.times,
+					Retry:       attempt + 1,
+					MaxRetries:  max(options.times-1, 0),
+					NextAttempt: attempt + 2,
+					NextDelay:   options.interval,
+					Err:         err,
+				})
+			}
 		case <-attemptCtx.Done():
 			cancelAttempt()
 			cause := rt.ContextDoneErr(attemptCtx)
 
 			if errors.Is(cause, ErrRetryAttemptTimeout) {
 				errs.Add(cause)
+				if attempt+1 < options.times {
+					notifyRetry(options.onRetry, RetryEvent{
+						Attempt:     attempt + 1,
+						MaxAttempts: options.times,
+						Retry:       attempt + 1,
+						MaxRetries:  max(options.times-1, 0),
+						NextAttempt: attempt + 2,
+						NextDelay:   options.interval,
+						Err:         cause,
+					})
+				}
 			} else {
 				errs.Add(cause)
 				return errs.Err()
@@ -276,9 +324,33 @@ func WithAttemptTimeout(timeout time.Duration) RetryOption {
 	}
 }
 
+// WithOnRetry registers one callback that is invoked after a failed attempt
+// when another retry attempt is still scheduled. Panics in the callback are
+// recovered and ignored so observability hooks do not change retry behavior.
+func WithOnRetry(fn func(RetryEvent)) RetryOption {
+	return func(options *retryOptions) {
+		options.onRetry = fn
+	}
+}
+
+// WithTimeoutLatePanicObserver registers one callback that is invoked when a
+// timeout callback panics after DoWithTimeout or DoWithTimeoutCtx has already
+// returned. Panics in the callback are recovered and ignored so observability
+// hooks do not change timeout behavior.
+func WithTimeoutLatePanicObserver(fn func(TimeoutLatePanicEvent)) TimeoutOption {
+	return func(options *timeoutOptions) {
+		options.latePanicObserver = fn
+	}
+}
+
 // newRetryOptions returns the default retry configuration.
 func newRetryOptions() *retryOptions {
 	return &retryOptions{times: defaultRetryTimes}
+}
+
+// newTimeoutOptions returns the default timeout configuration.
+func newTimeoutOptions() *timeoutOptions {
+	return &timeoutOptions{parentContext: context.Background()}
 }
 
 // validateRetryOptions panics when retry settings are invalid for the chosen
@@ -304,6 +376,32 @@ func normalizeRetryAttemptError(ctx context.Context, err error) error {
 	return rt.NormalizeContextErr(ctx, err)
 }
 
+func notifyRetry(onRetry func(RetryEvent), event RetryEvent) {
+	if onRetry == nil {
+		return
+	}
+
+	_ = rt.RunSafeFunc(func() error {
+		onRetry(event)
+		return nil
+	})
+}
+
+func formatTimeoutLatePanic(event TimeoutLatePanicEvent) string {
+	return fmt.Sprintf("%+v\n\n%s", event.Panic, event.Stack)
+}
+
+func notifyTimeoutLatePanic(observer func(TimeoutLatePanicEvent), event TimeoutLatePanicEvent) {
+	if observer == nil {
+		return
+	}
+
+	_ = rt.RunSafeFunc(func() error {
+		observer(event)
+		return nil
+	})
+}
+
 // DoWithTimeout runs fn with a derived timeout context and returns its result.
 func DoWithTimeout(fn func() error, timeout time.Duration, opts ...TimeoutOption) error {
 	return doWithTimeout(timeout, opts, func(context.Context) error {
@@ -322,11 +420,11 @@ func DoWithTimeoutCtx(fn func(context.Context) error, timeout time.Duration, opt
 func doWithTimeout(timeout time.Duration, opts []TimeoutOption, fn func(context.Context) error) error {
 	validateTimeout(timeout)
 
-	parentCtx := context.Background()
+	options := newTimeoutOptions()
 	for _, opt := range opts {
-		parentCtx = opt()
+		opt(options)
 	}
-	parentCtx = requireContext(parentCtx)
+	parentCtx := requireContext(options.parentContext)
 
 	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 	defer cancel()
@@ -343,11 +441,21 @@ func doWithTimeout(timeout time.Duration, opts []TimeoutOption, fn func(context.
 	rt.GoSafe(func() {
 		defer func() {
 			if p := recover(); p != nil {
-				payload := fmt.Sprintf("%+v\n\n%s", p, strings.TrimSpace(string(debug.Stack())))
+				event := TimeoutLatePanicEvent{
+					Panic: p,
+					Stack: strings.TrimSpace(string(debug.Stack())),
+				}
 				select {
 				case <-settled:
-					log.Printf("[flx] panic after DoWithTimeout returned: %v", payload)
-				case panicChan <- payload:
+					notifyTimeoutLatePanic(options.latePanicObserver, event)
+					return
+				default:
+				}
+
+				select {
+				case panicChan <- formatTimeoutLatePanic(event):
+				case <-settled:
+					notifyTimeoutLatePanic(options.latePanicObserver, event)
 				}
 			}
 		}()
@@ -371,8 +479,8 @@ func doWithTimeout(timeout time.Duration, opts []TimeoutOption, fn func(context.
 
 // WithContext sets the parent context for a timeout call.
 func WithContext(ctx context.Context) TimeoutOption {
-	return func() context.Context {
-		return ctx
+	return func(options *timeoutOptions) {
+		options.parentContext = ctx
 	}
 }
 

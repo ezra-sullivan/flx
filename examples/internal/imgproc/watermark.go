@@ -1,4 +1,4 @@
-package main
+package imgproc
 
 import (
 	"image"
@@ -59,8 +59,6 @@ var watermarkGlyphs = map[rune][watermarkGlyphHeight]string{
 	'Z': {"11111", "00001", "00010", "00100", "01000", "10000", "11111"},
 }
 
-// addWatermarkMarker draws a translucent footer bar and a text label so the
-// processed image is visibly distinct from the original.
 func addWatermarkMarker(src image.Image, text string, sourceURL string) *image.RGBA {
 	_ = sourceURL
 

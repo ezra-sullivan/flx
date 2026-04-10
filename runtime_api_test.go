@@ -1,8 +1,10 @@
 package flx
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -47,6 +49,7 @@ func TestDoWithRetryPanicsOnInvalidOptions(t *testing.T) {
 
 	t.Run("nil ctx", func(t *testing.T) {
 		assertPanicIs(t, ErrNilContext, func() {
+			//nolint:staticcheck // This test verifies that the API rejects a nil context.
 			_ = DoWithRetryCtx(nil, func(ctx context.Context, retryCount int) error { return nil })
 		})
 	})
@@ -132,6 +135,42 @@ func TestParallelWithErrorStrategyPanicsOnInvalidStrategy(t *testing.T) {
 	})
 }
 
+func TestParallelWithErrorStrategyContinueIgnoresWorkerErrorWithoutLogging(t *testing.T) {
+	var buf bytes.Buffer
+	restoreLogger := captureStdLogger(t, &buf)
+	defer restoreLogger()
+
+	err := ParallelWithErrorStrategy(control.ErrorStrategyContinue, func() {
+		panic("parallel continue boom")
+	})
+
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if got := strings.TrimSpace(buf.String()); got != "" {
+		t.Fatalf("expected no log output, got %q", got)
+	}
+}
+
+func TestParallelWithErrorStrategyLogAndContinueAliasDoesNotLog(t *testing.T) {
+	var buf bytes.Buffer
+	restoreLogger := captureStdLogger(t, &buf)
+	defer restoreLogger()
+
+	//nolint:staticcheck // compatibility alias coverage
+	strategy := control.ErrorStrategyLogAndContinue
+	err := ParallelWithErrorStrategy(strategy, func() {
+		panic("parallel alias boom")
+	})
+
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if got := strings.TrimSpace(buf.String()); got != "" {
+		t.Fatalf("expected no log output, got %q", got)
+	}
+}
+
 func TestDoWithRetryCtxRetriesOnAttemptTimeout(t *testing.T) {
 	var attempts atomic.Int32
 
@@ -183,6 +222,73 @@ func TestDoWithRetryCtxReturnsParentCancelCauseWhileWaitingForNextAttempt(t *tes
 	}
 }
 
+func TestDoWithRetryCtxOnRetryReportsFailedAttemptsBeforeNextRetry(t *testing.T) {
+	attemptErr := errors.New("attempt failed")
+	events := make([]RetryEvent, 0, 2)
+
+	err := DoWithRetryCtx(t.Context(), func(ctx context.Context, retryCount int) error {
+		return attemptErr
+	}, WithRetry(3), WithInterval(25*time.Millisecond), WithOnRetry(func(event RetryEvent) {
+		events = append(events, event)
+	}))
+
+	if !errors.Is(err, attemptErr) {
+		t.Fatalf("expected final error to contain attempt failure, got %v", err)
+	}
+	if got := len(events); got != 2 {
+		t.Fatalf("expected retry observer to run for the first two failed attempts, got %d events", got)
+	}
+
+	first := events[0]
+	if first.Attempt != 1 || first.MaxAttempts != 3 || first.Retry != 1 || first.MaxRetries != 2 || first.NextAttempt != 2 || first.NextDelay != 25*time.Millisecond || !errors.Is(first.Err, attemptErr) {
+		t.Fatalf("unexpected first retry event: %#v", first)
+	}
+
+	second := events[1]
+	if second.Attempt != 2 || second.MaxAttempts != 3 || second.Retry != 2 || second.MaxRetries != 2 || second.NextAttempt != 3 || second.NextDelay != 25*time.Millisecond || !errors.Is(second.Err, attemptErr) {
+		t.Fatalf("unexpected second retry event: %#v", second)
+	}
+}
+
+func TestDoWithRetryCtxOnRetryReportsAttemptTimeout(t *testing.T) {
+	var events []RetryEvent
+
+	err := DoWithRetryCtx(t.Context(), func(ctx context.Context, retryCount int) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}, WithRetry(2), WithAttemptTimeout(20*time.Millisecond), WithOnRetry(func(event RetryEvent) {
+		events = append(events, event)
+	}))
+
+	if !errors.Is(err, ErrRetryAttemptTimeout) {
+		t.Fatalf("expected attempt timeout error, got %v", err)
+	}
+	if got := len(events); got != 1 {
+		t.Fatalf("expected one retry event for the timed out first attempt, got %d", got)
+	}
+	if event := events[0]; event.Attempt != 1 || event.MaxAttempts != 2 || event.Retry != 1 || event.MaxRetries != 1 || event.NextAttempt != 2 || event.NextDelay != 0 || !errors.Is(event.Err, ErrRetryAttemptTimeout) {
+		t.Fatalf("unexpected retry event: %#v", event)
+	}
+}
+
+func TestDoWithRetryCtxOnRetryRecoversObserverPanic(t *testing.T) {
+	var attempts atomic.Int32
+
+	err := DoWithRetryCtx(t.Context(), func(ctx context.Context, retryCount int) error {
+		attempts.Add(1)
+		return errors.New("boom")
+	}, WithRetry(2), WithOnRetry(func(event RetryEvent) {
+		panic("retry observer boom")
+	}))
+
+	if err == nil {
+		t.Fatal("expected final retry error")
+	}
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("expected retry loop to continue after observer panic, got %d attempts", got)
+	}
+}
+
 // These tests cover timeout validation, context propagation, cancellation causes, and panic rethrow behavior.
 func TestDoWithTimeoutPanicsOnInvalidInputs(t *testing.T) {
 	t.Run("negative timeout", func(t *testing.T) {
@@ -193,6 +299,7 @@ func TestDoWithTimeoutPanicsOnInvalidInputs(t *testing.T) {
 
 	t.Run("nil parent ctx", func(t *testing.T) {
 		assertPanicIs(t, ErrNilContext, func() {
+			//nolint:staticcheck // This test verifies that WithContext(nil) is rejected.
 			_ = DoWithTimeout(func() error { return nil }, time.Millisecond, WithContext(nil))
 		})
 	})
@@ -305,5 +412,114 @@ func TestDoWithTimeoutCtxRepanics(t *testing.T) {
 	}
 	if !strings.Contains(recovered.(string), "timeout boom") {
 		t.Fatalf("expected panic payload to mention timeout boom, got %v", recovered)
+	}
+}
+
+func TestDoWithTimeoutCtxReportsLatePanicToObserver(t *testing.T) {
+	allowLatePanic := make(chan struct{})
+	reports := make(chan TimeoutLatePanicEvent, 1)
+
+	err := DoWithTimeoutCtx(func(ctx context.Context) error {
+		<-ctx.Done()
+		<-allowLatePanic
+		panic("late timeout boom")
+	}, 20*time.Millisecond, WithTimeoutLatePanicObserver(func(event TimeoutLatePanicEvent) {
+		reports <- event
+	}))
+
+	if !errors.Is(err, ErrTimeout) {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+
+	close(allowLatePanic)
+
+	select {
+	case event := <-reports:
+		if got := event.Stack; got == "" {
+			t.Fatal("expected late panic stack to be captured")
+		}
+		if got := event.Panic; got != "late timeout boom" {
+			t.Fatalf("expected late panic payload, got %v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for late panic observer")
+	}
+}
+
+func TestDoWithTimeoutCtxRecoversLatePanicObserverPanic(t *testing.T) {
+	allowLatePanic := make(chan struct{})
+	observerCalled := make(chan struct{})
+
+	err := DoWithTimeoutCtx(func(ctx context.Context) error {
+		<-ctx.Done()
+		<-allowLatePanic
+		panic("late timeout boom")
+	}, 20*time.Millisecond, WithTimeoutLatePanicObserver(func(event TimeoutLatePanicEvent) {
+		close(observerCalled)
+		panic("observer boom")
+	}))
+
+	if !errors.Is(err, ErrTimeout) {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+
+	close(allowLatePanic)
+
+	select {
+	case <-observerCalled:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for late panic observer")
+	}
+}
+
+func TestDoWithTimeoutCtxLatePanicDoesNotLogByDefault(t *testing.T) {
+	var buf bytes.Buffer
+	restoreLogger := captureStdLogger(t, &buf)
+	defer restoreLogger()
+
+	allowLatePanic := make(chan struct{})
+	lateExited := make(chan struct{})
+
+	err := DoWithTimeoutCtx(func(ctx context.Context) error {
+		<-ctx.Done()
+		<-allowLatePanic
+		defer close(lateExited)
+		panic("late timeout boom")
+	}, 20*time.Millisecond)
+
+	if !errors.Is(err, ErrTimeout) {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+
+	close(allowLatePanic)
+
+	select {
+	case <-lateExited:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for late timeout panic to unwind")
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	if got := strings.TrimSpace(buf.String()); got != "" {
+		t.Fatalf("expected no default log output, got %q", got)
+	}
+}
+
+func captureStdLogger(t *testing.T, dst *bytes.Buffer) func() {
+	t.Helper()
+
+	oldWriter := log.Writer()
+	oldFlags := log.Flags()
+	oldPrefix := log.Prefix()
+
+	log.SetOutput(dst)
+	log.SetFlags(0)
+	log.SetPrefix("")
+
+	return func() {
+		log.SetOutput(oldWriter)
+		log.SetFlags(oldFlags)
+		log.SetPrefix(oldPrefix)
 	}
 }

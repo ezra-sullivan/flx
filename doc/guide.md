@@ -561,17 +561,19 @@ out := flx.MapErr(
 )
 ```
 
-### `ErrorStrategyLogAndContinue`
+### `ErrorStrategyContinue`
 
-璁板綍鏃ュ織骞剁户缁紝涓嶆妸閿欒鍐欏叆 stream 鐘舵€侊細
+缁х画鎵ц锛屼絾涓嶆妸閿欒鍐欏叆 stream 鐘舵€侊細
 
 ```go
 out := flx.MapErr(
 	in,
 	worker,
-	control.WithErrorStrategy(control.ErrorStrategyLogAndContinue),
+	control.WithErrorStrategy(control.ErrorStrategyContinue),
 )
 ```
+
+`ErrorStrategyLogAndContinue` 浠嶄繚鐣欎负鍏煎鍒悕锛屼絾涓嶅啀鍐呭缓杈撳嚭鏃ュ織銆?
 
 ### `WorkerError`
 
@@ -745,6 +747,22 @@ err := flx.DoWithTimeoutCtx(
 )
 ```
 
+### `WithTimeoutLatePanicObserver`
+
+濡傛灉 timeout 宸茬粡杩斿洖锛屼絾鍥炶皟鍚庣画鍙堝彂鐢?panic锛屽彲浠ラ€氳繃 observer 鎷跨粺涓€鍙娴嬩簨浠讹細
+
+```go
+err := flx.DoWithTimeoutCtx(
+	func(ctx context.Context) error {
+		return callWithContext(ctx)
+	},
+	5*time.Second,
+	flx.WithTimeoutLatePanicObserver(func(event flx.TimeoutLatePanicEvent) {
+		logger.Printf("late timeout panic: %v", event.Panic)
+	}),
+)
+```
+
 ### 甯歌閿欒
 
 - `ErrCanceled`
@@ -789,23 +807,30 @@ err := flx.DoWithTimeoutCtx(
 - `First` / `Last` / `Max` / `Min` 鐜板湪閮借繑鍥?`ok`
 - 濡傛灉浣犱互鍓嶅湪娴侀噷浼?`struct{ Value T; Err error }` 杩欑被缁撴灉瀵硅薄锛宍flx` 閲岀户缁嚜瀹氫箟鍗冲彲锛屼絾涓嶈鎶婂畠鍜?`MapErr` / `CollectErr` 瑙嗕负鍚屼竴灞傞敊璇涔?
 濡傞渶浠?`fx` 杩佺Щ锛岃缁撳悎 README 鍜?`quickstart.md` 涓殑 API 瀵圭収璇存槑閫愭鏇挎崲銆?
-## 15. 瀹炴垬绀轰緥
+## 15. 实战示例
 
-濡傛灉浣犳兂鐪嬩竴鏉″寘鍚涓?stage銆佷笖姣忎釜 stage 浣跨敤涓嶅悓 worker 绛栫暐鐨?HTTP pipeline锛屽彲浠ュ弬鑰冭繖涓畬鏁寸ず渚嬶細
+如果你想看一条包含多个 stage、并且每个 stage 使用不同 worker 策略的图片处理流水线，可以参考这个完整示例：
 
-- [HTTP 鍥剧墖澶勭悊娴佹按绾跨ず渚媇(./examples/http-image-pipeline.md)
+- [图片处理流水线示例](./examples/imgproc-pipeline.md)
 
-杩欎釜绀轰緥灞曠ず浜嗭細
+这个示例展示了：
 
-- HTTP 鍒嗛〉鍒楀嚭鍥剧墖
-- 鍥哄畾 worker 涓嬭浇
-- 鍔ㄦ€?worker 鍋氱缉鏀?- 鍥哄畾 worker 鍔犳按鍗板苟涓婁紶
-- 鎺ㄨ崘鐨?stage 鍑芥暟缁勫悎鍐欐硶
-- 瀵圭収鐨勫師鐢?`flx` API 閫愭鎷兼帴鍐欐硶
+- Picsum 分页列图
+- 固定 worker 下载
+- 动态 worker 做缩放
+- 固定 worker 加水印并保存
+- 推荐的 stage 函数组合写法
+- 对照的原生 `flx` API 逐段拼接写法
+
+主线示例的 list / download 走真实 Picsum，retry 示例单独保持本地可控。
 
 ## 16. Pipeline Coordinator
 
 如果你希望根据 stage backlog、link backlog 和资源压力去调节动态 worker，而不是在业务代码里手动 `SetWorkers(...)`，就使用 `pipeline/coordinator`。
+
+如果你想系统看 `pipeline/coordinator` 和 `pipeline/observe` 的分工、最小接法、`Snapshot()` / `Tick()` 关系，以及 resource observer 的使用方式，优先看单独文档：
+
+- [coordinator 与 observe 使用说明](./coordinator-observe.md)
 
 ### 核心接法
 
@@ -815,6 +840,12 @@ err := flx.DoWithTimeoutCtx(
 - 在 stage 上挂 `coordinator.WithCoordinator(...)`
 - 给 stage 标名字 `coordinator.WithStageName(...)`
 - 只给需要被调节的动态 stage 配 `coordinator.WithStageBudget(...)`
+
+当前适用边界：
+
+- 一个 `PipelineCoordinator` 实例按“一次 pipeline run”使用；它会在整个实例生命周期内保留最近一次看到的 stage/link/control 状态
+- `Links` 视图当前按 `fromStage` 聚合，只保留每个 stage 的一条 outbound link snapshot
+- 因此目前更适合线性 pipeline；如果后面要支持 fan-out / DAG，需要先扩展 link 表示模型
 
 示例：
 
@@ -867,6 +898,13 @@ images := flx.Stage(
 - stage 间 link backlog
 - 外部资源压力样本
 
+资源采样契约补充：
+
+- `Snapshot()` 和 `Tick()` 都会各自独立轮询 resource observer
+- 同一个 coordinator 实例会串行化这些轮询，避免同一个 observer 被 `Snapshot()` / `Tick()` 并发重入
+- 因此，紧挨着打印出来的 snapshot，不保证就是下一次 `Tick()` 真正用于决策的那一份 resource sample
+- 如果同一个 observer 被复用到多个 coordinator 实例，observer 仍然需要自己保证线程安全
+
 ### `PipelineCoordinatorPolicy` 字段语义
 
 - `ScaleUpStep`
@@ -905,7 +943,7 @@ images := flx.Stage(
 
 - 下游 link backlog 优先于上游缩容
 - `warning` 级资源压力会 brake scale-up
-- `critical` 级资源压力会对空闲 stage 施加 shrink bias
+- `critical` 级资源压力只会对满足 `activeWorkers < currentWorkers` 的空闲 stage 施加 shrink bias
 - `budget_min` 是硬纠偏，不受 cooldown / hysteresis 限制
 - cooldown / hysteresis 是按 stage、按方向分别生效的
 
@@ -936,4 +974,10 @@ images := flx.Stage(
 - 外部队列长度
 - 下游服务限流状态
 
-当前内置示例使用的是基于 `runtime.MemStats` 的 memory observer，完整可运行接法见 [examples/http-image-pipeline.md](./examples/http-image-pipeline.md)。
+实现约束建议：
+
+- observer 应尽量快速返回，因为它运行在调用 `Snapshot()` / `Tick()` 的 goroutine 上
+- 同一个 coordinator 内部不会并发重入同一个 observer
+- 但跨多个 coordinator 复用同一个 observer 时，仍然要由 observer 自己处理同步
+
+当前内置示例使用的是基于 `runtime.MemStats` 的 memory observer，完整可运行接法见 [图片处理 Coordinator 示例](./examples/imgproc-coordinator.md)。

@@ -75,34 +75,74 @@ func main() {
 
 ## 实战示例
 
-仓库里还带了一个可直接运行的 HTTP 图片处理 example：
+仓库里现在把图片处理场景拆成三条主 example，再加一个独立 retry example：
+
+- 主线 examples 走真实 `picsum.photos` 列图和下载
+- `imgproc_retry` 单独保持本地可控，方便稳定演示重试行为
+
+### 1. 图片处理流水线
 
 ```powershell
-go run ./examples/http_image_pipeline
+go run ./examples/imgproc_pipeline
 ```
 
-这个示例会：
-- 从 `https://picsum.photos/v2/list` 分页拉取图片
-- 下载大图并保存到 `examples/http_image_pipeline/.output/original/`（默认 5 张）
-- 把大图缩成小图并保存到 `examples/http_image_pipeline/.output/processed/`
-- 下载阶段会用 `flx.DoWithRetryCtx(...)` 自动重试，默认 3 次
-- `coordinator` 模式会额外输出 stage/link/resource 三视图 snapshot，并周期性执行 `Tick()`
-- 默认只做下载和处理，不做上传；如需上传，在 `examples/http_image_pipeline/main.go` 里填 `UploadEndpoint`
+这条 example 聚焦业务 pipeline 本身：
 
-三种实现都在仓库里：
-- coordinator 版：`examples/http_image_pipeline/coordinator_pipeline.go`
-- `Stage` 组合版：`examples/http_image_pipeline/stage_pipeline.go`
-- 原生 `flx` API 版：`examples/http_image_pipeline/native_pipeline.go`
+- Picsum 分页列图
+- 下载、缩放、水印、本地保存
+- `Stage` 组合版作为默认写法
+- 原生 `flx` API 版作为对照写法
 
-可显式指定模式：
+可显式切到 native 对照版：
 
 ```powershell
-go run ./examples/http_image_pipeline -mode coordinator
-go run ./examples/http_image_pipeline -mode stage
-go run ./examples/http_image_pipeline -mode native
+go run ./examples/imgproc_pipeline -mode native
 ```
 
-完整说明见 [doc/examples/http-image-pipeline.md](./doc/examples/http-image-pipeline.md)。
+完整说明见 [doc/examples/imgproc-pipeline.md](./doc/examples/imgproc-pipeline.md)。
+
+### 2. 图片处理 Observe 示例
+
+```powershell
+go run ./examples/imgproc_observe
+```
+
+这条 example 专门讲 `observe`：
+
+- 使用同一条 Picsum 图片处理业务线
+- 只展示 stage/link snapshot
+- 不接 `PipelineCoordinator`
+
+完整说明见 [doc/examples/imgproc-observe.md](./doc/examples/imgproc-observe.md)。
+
+### 3. 图片处理 Coordinator 示例
+
+```powershell
+go run ./examples/imgproc_coordinator
+```
+
+这条 example 专门讲 `coordinator`：
+
+- 使用同一条 Picsum 图片处理业务线
+- 给 resize stage 配 budget
+- 展示 snapshot、decision、resource observer 和外部 `Tick()` loop
+
+完整说明见 [doc/examples/imgproc-coordinator.md](./doc/examples/imgproc-coordinator.md)。
+
+### 4. 图片处理重试示例
+
+```powershell
+go run ./examples/imgproc_retry
+```
+
+这个例子固定演示：
+
+- 本地可控 transport 上的下载重试
+- 某些下载在第 2 次或第 3 次尝试成功
+- 某些下载在 3 次预算内全部失败
+- `WithOnRetry` warning 是怎么跟最终 item 结果对应起来的
+
+完整说明见 [doc/examples/imgproc-retry.md](./doc/examples/imgproc-retry.md)。
 
 ## API 形状
 `flx` 采用“同类型操作保留方法，跨类型操作使用包级泛型函数”的混合设计。
@@ -159,13 +199,14 @@ out := flx.Map(s, func(v int) string { return fmt.Sprintf("v=%d", v) })
 - `control.WithErrorStrategy`
 - `control.ErrorStrategyFailFast`
 - `control.ErrorStrategyCollect`
-- `control.ErrorStrategyLogAndContinue`
+- `control.ErrorStrategyContinue`
+- `control.ErrorStrategyLogAndContinue`（兼容别名，已废弃）
 
 ### 独立工具函数
 
 - `Parallel` / `ParallelErr` / `ParallelWithErrorStrategy`
-- `DoWithRetry` / `DoWithRetryCtx`
-- `DoWithTimeout` / `DoWithTimeoutCtx`
+- `DoWithRetry` / `DoWithRetryCtx` / retry observer via `WithOnRetry`
+- `DoWithTimeout` / `DoWithTimeoutCtx` / timeout late-panic observer via `WithTimeoutLatePanicObserver`
 
 ## 内存边界
 
@@ -242,6 +283,11 @@ out.Done()
 - 给可调 stage 配预算 `coordinator.WithStageBudget(...)`
 - 在外部控制循环里周期性调用 `PipelineCoordinator.Snapshot()` 和 `PipelineCoordinator.Tick()`
 
+当前适用边界：
+
+- 一个 `PipelineCoordinator` 实例按“一次 pipeline run”使用；它会在实例生命周期内保留最近一次看到的 stage/link/control 状态
+- `Links` 视图当前按 `fromStage` 聚合，只保留每个 stage 的一条 outbound link snapshot；线性链路场景是当前主目标，fan-out 还没有单独建模
+
 `PipelineCoordinatorPolicy` 当前几个核心字段：
 
 - `ScaleUpStep`
@@ -268,8 +314,14 @@ out.Done()
 - 下游 `incoming link backlog` 优先触发下游扩容
 - stage 自身 backlog 次之
 - `warning` 级资源压力会 brake scale-up
-- `critical` 级资源压力会对空闲 stage 施加 shrink bias
+- `critical` 级资源压力只会对满足 `activeWorkers < currentWorkers` 的空闲 stage 施加 shrink bias
 - `budget_min` 属于硬纠偏，不受 cooldown / hysteresis 限制
+
+资源采样契约补充：
+
+- `Snapshot()` 和 `Tick()` 都会各自独立轮询 resource observers
+- 同一个 coordinator 实例会串行化这些轮询，避免同一个 observer 被 `Snapshot()` / `Tick()` 并发重入
+- 但相邻的 `Snapshot()` / `Tick()` 不保证使用同一份 resource sample；如果把同一个 observer 共享给多个 coordinator，仍需 observer 自己保证同步
 
 示例：
 
@@ -287,7 +339,7 @@ pipelineCoordinator := coordinator.NewPipelineCoordinator(
 )
 ```
 
-完整接法可直接看 [doc/examples/http-image-pipeline.md](./doc/examples/http-image-pipeline.md) 里的 coordinator 版示例。
+完整接法可直接看 [doc/examples/imgproc-coordinator.md](./doc/examples/imgproc-coordinator.md)。
 
 ## 错误处理建议
 
@@ -295,7 +347,9 @@ pipelineCoordinator := coordinator.NewPipelineCoordinator(
 
 - `fail-fast`：尽快取消当前操作，并在终结阶段暴露错误
 - `collect`：继续执行，最后合并错误
-- `log-and-continue`：记录日志并继续
+- `continue`：继续执行，但不记录到 stream state
+
+`control.ErrorStrategyLogAndContinue` 仍保留为兼容别名，但不再内建输出日志；如需日志，请在业务代码里自行记录。
 
 业务代码里，如果你需要稳定的最终错误边界，优先使用会完整消费 source 的 `*Err` 终结操作，例如 `DoneErr` / `CollectErr`：
 
@@ -337,7 +391,11 @@ items, err := out.CollectErr()
 - 非 release 标签说明：[doc/tag-notes/README.md](./doc/tag-notes/README.md)
 - 快速上手：[doc/quickstart.md](./doc/quickstart.md)
 - 详细用法：[doc/guide.md](./doc/guide.md)
-- 实战示例：[doc/examples/http-image-pipeline.md](./doc/examples/http-image-pipeline.md)
+- coordinator / observe 使用：[doc/coordinator-observe.md](./doc/coordinator-observe.md)
+- 实战示例：[图片处理流水线](./doc/examples/imgproc-pipeline.md)
+- 实战示例：[图片处理 Observe](./doc/examples/imgproc-observe.md)
+- 实战示例：[图片处理 Coordinator](./doc/examples/imgproc-coordinator.md)
+- 实战示例：[图片处理重试](./doc/examples/imgproc-retry.md)
 - 架构设计：[doc/architecture.md](./doc/architecture.md)
 - 仓库工作流：[doc/git-workflow.md](./doc/git-workflow.md)
 

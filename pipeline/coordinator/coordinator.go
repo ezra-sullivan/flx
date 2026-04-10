@@ -20,15 +20,19 @@ type PipelineCoordinatorPolicy struct {
 	ScaleDownHysteresis int
 }
 
-// PipelineCoordinator aggregates pipeline snapshots and exposes a stable
-// read-only view for future control policies.
+// PipelineCoordinator aggregates pipeline snapshots for one pipeline run and
+// exposes a stable read-only view for coordinator decisions. It retains the
+// last observed state for the lifetime of the instance, so callers should
+// create a fresh coordinator for each new run.
 type PipelineCoordinator struct {
 	policy           PipelineCoordinatorPolicy
 	decisionObserver func(observe.PipelineDecision)
 	coord            *coordinatorinternal.Coordinator
 }
 
-// NewPipelineCoordinator returns a new read-only pipeline coordinator.
+// NewPipelineCoordinator returns a new pipeline coordinator for one pipeline
+// run. The current snapshot model keeps one outbound link view per from-stage,
+// so fan-out topologies are not yet represented as distinct links.
 func NewPipelineCoordinator(policy PipelineCoordinatorPolicy, opts ...CoordinatorOption) *PipelineCoordinator {
 	options := coordinatorOptions{}
 	for _, opt := range opts {

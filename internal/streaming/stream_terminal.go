@@ -152,11 +152,8 @@ func (s Stream[T]) CollectErr() ([]T, error) {
 // First returns the first item and then drains the rest of the stream so any
 // delayed fail-fast error is observed before the call returns.
 func (s Stream[T]) First() (T, bool) {
-	for {
-		item, ok := s.next()
-		if !ok {
-			break
-		}
+	item, ok := s.next()
+	if ok {
 		s.drainAndMaybePanic()
 		return item, true
 	}
@@ -169,11 +166,8 @@ func (s Stream[T]) First() (T, bool) {
 // FirstErr returns the first item and the current error state, then drains the
 // remaining source asynchronously.
 func (s Stream[T]) FirstErr() (T, bool, error) {
-	for {
-		item, ok := s.next()
-		if !ok {
-			break
-		}
+	item, ok := s.next()
+	if ok {
 		return item, true, s.shortCircuitErr()
 	}
 

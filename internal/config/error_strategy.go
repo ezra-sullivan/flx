@@ -19,9 +19,14 @@ const (
 	// ErrorStrategyCollect records worker errors and returns them from Err
 	// terminals without canceling sibling workers.
 	ErrorStrategyCollect
-	// ErrorStrategyLogAndContinue logs worker errors and allows the operation to
+	// ErrorStrategyContinue ignores worker errors and allows the operation to
 	// continue without recording them in stream state.
-	ErrorStrategyLogAndContinue
+	ErrorStrategyContinue
+	// ErrorStrategyLogAndContinue is a deprecated compatibility alias for
+	// ErrorStrategyContinue.
+	//
+	// Deprecated: use ErrorStrategyContinue.
+	ErrorStrategyLogAndContinue = ErrorStrategyContinue
 )
 
 // String returns a human-readable representation of s.
@@ -31,8 +36,8 @@ func (s ErrorStrategy) String() string {
 		return "fail-fast"
 	case ErrorStrategyCollect:
 		return "collect"
-	case ErrorStrategyLogAndContinue:
-		return "log-and-continue"
+	case ErrorStrategyContinue:
+		return "continue"
 	default:
 		return fmt.Sprintf("ErrorStrategy(%d)", s)
 	}
@@ -41,7 +46,7 @@ func (s ErrorStrategy) String() string {
 // ValidateErrorStrategy returns an error when strategy is unsupported.
 func ValidateErrorStrategy(strategy ErrorStrategy) error {
 	switch strategy {
-	case ErrorStrategyFailFast, ErrorStrategyCollect, ErrorStrategyLogAndContinue:
+	case ErrorStrategyFailFast, ErrorStrategyCollect, ErrorStrategyContinue:
 		return nil
 	default:
 		return fmt.Errorf("%w: %s", ErrInvalidErrorStrategy, strategy)

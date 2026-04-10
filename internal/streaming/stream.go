@@ -106,10 +106,6 @@ func (s Stream[T]) withSource(source <-chan T) Stream[T] {
 	return WithState(source, s.state)
 }
 
-func (s Stream[T]) withSourceAndLink(source <-chan T, linkMeter *link.Meter) Stream[T] {
-	return WithStateAndLink(source, s.state, linkMeter)
-}
-
 // Concat merges s with others while preserving per-stream item order. Items
 // from different input streams may interleave based on runtime scheduling.
 func (s Stream[T]) Concat(others ...Stream[T]) Stream[T] {

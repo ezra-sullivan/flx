@@ -7,7 +7,7 @@
 - 基于 channel 的异步管道
 - 每个操作独立应用并发选项
 - 支持固定并发、无限并发、动态并发
-- 支持 fail-fast / collect / log-and-continue 三种错误策略
+- 支持 fail-fast / collect / continue 三种错误策略
 
 与 `fx` 的主要区别是：
 
@@ -96,6 +96,11 @@ flx/
 - `WithDecisionObserver`
 - `WithResourceObserver`
 
+当前边界也需要明确：
+
+- 一个 `PipelineCoordinator` 实例按一次 pipeline run 使用
+- 当前 link snapshot 按 `fromStage` 聚合，尚未把 fan-out 拆成多个独立 outbound link 视图
+
 ### 3.4 `flx/pipeline/observe`
 
 `flx/pipeline/observe` 负责：
@@ -126,7 +131,7 @@ flx/
 
 ## 4. 后续扩展规则
 
-后续如果开始做 pipeline coordinator，不应重新把实现堆回根目录。
+后续继续扩展 pipeline coordinator / observe / control 面时，不应重新把实现堆回根目录。
 
 推荐落点：
 

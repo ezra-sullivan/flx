@@ -32,9 +32,14 @@ const (
 	// ErrorStrategyCollect records worker errors and returns them from Err
 	// terminals without canceling sibling workers.
 	ErrorStrategyCollect = config.ErrorStrategyCollect
-	// ErrorStrategyLogAndContinue logs worker errors and allows the operation to
+	// ErrorStrategyContinue ignores worker errors and allows the operation to
 	// continue without recording them in stream state.
-	ErrorStrategyLogAndContinue = config.ErrorStrategyLogAndContinue
+	ErrorStrategyContinue = config.ErrorStrategyContinue
+	// ErrorStrategyLogAndContinue is a deprecated compatibility alias for
+	// ErrorStrategyContinue.
+	//
+	// Deprecated: use ErrorStrategyContinue.
+	ErrorStrategyLogAndContinue = ErrorStrategyContinue
 )
 
 // WorkerError wraps a failure produced by one worker goroutine.

@@ -81,7 +81,7 @@ func TestTickResourcePressureBrakesScaleUp(t *testing.T) {
 	}
 }
 
-func TestTickCriticalResourcePressureShrinksStage(t *testing.T) {
+func TestTickCriticalResourcePressureDoesNotShrinkBusyStage(t *testing.T) {
 	coord := New(Policy{}, resourceinternal.ObserverFunc(func() resourceinternal.Snapshot {
 		return resourceinternal.Snapshot{
 			Samples: []resourceinternal.PressureSample{{
@@ -97,8 +97,32 @@ func TestTickCriticalResourcePressureShrinksStage(t *testing.T) {
 
 	decision := coord.Tick()
 
+	if got := stage.Workers(); got != 4 {
+		t.Fatalf("expected busy stage to stay at 4 workers, got %d", got)
+	}
+	if len(decision.Stages) != 0 {
+		t.Fatalf("expected no shrink decision for busy stage, got %#v", decision.Stages)
+	}
+}
+
+func TestTickCriticalResourcePressureShrinksIdleStage(t *testing.T) {
+	coord := New(Policy{}, resourceinternal.ObserverFunc(func() resourceinternal.Snapshot {
+		return resourceinternal.Snapshot{
+			Samples: []resourceinternal.PressureSample{{
+				Name:  "memory",
+				Level: resourceinternal.PressureLevelCritical,
+			}},
+		}
+	}))
+	stage := controlinternal.NewController(4)
+
+	coord.RegisterControllableStage("resize", stage, StageBudget{MinWorkers: 1, MaxWorkers: 5})
+	coord.ObserveStage(metrics.StageMetrics{StageName: "resize", ActiveWorkers: 3, Backlog: 0})
+
+	decision := coord.Tick()
+
 	if got := stage.Workers(); got != 3 {
-		t.Fatalf("expected workers to shrink to 3, got %d", got)
+		t.Fatalf("expected idle stage to shrink to 3 workers, got %d", got)
 	}
 	if len(decision.Stages) != 1 {
 		t.Fatalf("expected one stage decision, got %#v", decision.Stages)

@@ -61,14 +61,27 @@ func (c *Controller) Release() {
 }
 
 // RegisterCancel records one interruptible worker cancel function and returns
-// a monotonically increasing registration ID.
+// a monotonically increasing registration ID. When the controller limit was
+// already reduced before this worker became registration-visible, the newest
+// registration is canceled immediately to preserve shrink semantics.
 func (c *Controller) RegisterCancel(cancel context.CancelCauseFunc) int {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	id := c.nextID
 	c.nextID++
 	c.cancels[id] = cancel
+
+	shouldCancelNewest := len(c.cancels) > c.sem.Cap()
+	if shouldCancelNewest {
+		delete(c.cancels, id)
+	}
+
+	c.mu.Unlock()
+
+	if shouldCancelNewest && cancel != nil {
+		cancel(ErrWorkerLimitReduced)
+	}
+
 	return id
 }
 

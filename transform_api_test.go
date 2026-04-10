@@ -1,6 +1,7 @@
 package flx
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"slices"
@@ -66,6 +67,35 @@ func TestStageErrCollectsWorkerErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid syntax") {
 		t.Fatalf("expected strconv error, got %v", err)
+	}
+}
+
+func TestStageErrLogAndContinueAliasSkipsErrorWithoutLogging(t *testing.T) {
+	var buf bytes.Buffer
+	restoreLogger := captureStdLogger(t, &buf)
+	defer restoreLogger()
+	//nolint:staticcheck // compatibility alias coverage
+	strategy := control.ErrorStrategyLogAndContinue
+
+	out := StageErr(
+		t.Context(),
+		Values("1", "x", "3"),
+		func(ctx context.Context, item string) (int, error) {
+			return strconv.Atoi(item)
+		},
+		control.WithWorkers(1),
+		control.WithErrorStrategy(strategy),
+	)
+
+	items, err := out.CollectErr()
+	if !slices.Equal(items, []int{1, 3}) {
+		t.Fatalf("expected successful items to continue, got %v", items)
+	}
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if got := strings.TrimSpace(buf.String()); got != "" {
+		t.Fatalf("expected no log output, got %q", got)
 	}
 }
 

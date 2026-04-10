@@ -43,6 +43,10 @@ type ResourceSnapshot struct {
 }
 
 // ResourceObserver reports the latest resource pressure snapshot.
+//
+// When attached to pipeline/coordinator, Snapshot and Tick each perform their
+// own poll. One coordinator instance serializes its own polls, but adjacent
+// Snapshot and Tick calls are still independent samples.
 type ResourceObserver interface {
 	ObserveResource() ResourceSnapshot
 }

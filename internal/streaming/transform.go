@@ -3,7 +3,6 @@ package streaming
 import (
 	"context"
 	"errors"
-	"log"
 	"time"
 
 	"github.com/ezra-sullivan/flx/internal/config"
@@ -466,17 +465,19 @@ func transformErr[T, U any](s Stream[T], fn func(T, chan<- U) error, opts ...Opt
 		panic(config.ErrInterruptibleWorkersRequireContextTransform)
 	}
 
+	ctx := context.TODO()
+
 	switch {
 	case options.Unlimited():
-		return walkUnlimited[T, U](nil, s, func(_ context.Context, item T, pipe chan<- U) error {
+		return walkUnlimited[T, U](ctx, s, func(_ context.Context, item T, pipe chan<- U) error {
 			return fn(item, pipe)
 		}, options, stageName)
 	case options.Controller() != nil:
-		return walkDynamic[T, U](nil, s, func(_ context.Context, item T, pipe chan<- U) error {
+		return walkDynamic[T, U](ctx, s, func(_ context.Context, item T, pipe chan<- U) error {
 			return fn(item, pipe)
 		}, options, stageName)
 	default:
-		return walkLimited[T, U](nil, s, func(_ context.Context, item T, pipe chan<- U) error {
+		return walkLimited[T, U](ctx, s, func(_ context.Context, item T, pipe chan<- U) error {
 			return fn(item, pipe)
 		}, options, stageName)
 	}
@@ -614,8 +615,7 @@ func newOperationController(parent context.Context, handle state.Handle, strateg
 			if handle != nil {
 				handle.Add(err, false)
 			}
-		case config.ErrorStrategyLogAndContinue:
-			log.Printf("[flx] worker error: %v", err)
+		case config.ErrorStrategyContinue:
 		case config.ErrorStrategyFailFast:
 			if handle != nil {
 				handle.Add(err, true)
@@ -630,9 +630,4 @@ func newOperationController(parent context.Context, handle state.Handle, strateg
 	})
 
 	return op
-}
-
-func drain[T any](source <-chan T) {
-	for range source {
-	}
 }

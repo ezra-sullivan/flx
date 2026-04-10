@@ -11,11 +11,14 @@ import (
 	resourceinternal "github.com/ezra-sullivan/flx/internal/resource"
 )
 
-// Coordinator aggregates the latest stage and link snapshots for one pipeline.
-// It is safe for concurrent use.
+// Coordinator aggregates the latest stage and link snapshots for one pipeline
+// run. It retains the last observed stage/link/control state for the lifetime
+// of the instance, so callers should create a fresh coordinator for each new
+// run. It is safe for concurrent use.
 type Coordinator struct {
-	mu     sync.RWMutex
-	tickMu sync.Mutex
+	mu         sync.RWMutex
+	tickMu     sync.Mutex
+	resourceMu sync.Mutex
 
 	registry  stageRegistry
 	policy    Policy
@@ -72,7 +75,9 @@ func (c *Coordinator) ObserveStage(snapshot metrics.StageMetrics) {
 	c.mu.Unlock()
 }
 
-// ObserveLink stores the latest snapshot for one outbound link.
+// ObserveLink stores the latest snapshot for one outbound link. The current
+// coordinator view keeps only one outbound link snapshot per FromStage, so a
+// later observation from the same stage replaces the earlier one.
 func (c *Coordinator) ObserveLink(snapshot linkinternal.Metrics) {
 	if c == nil {
 		return
@@ -125,7 +130,7 @@ func (c *Coordinator) Snapshot() Snapshot {
 	resourceObservers := append([]resourceinternal.Observer(nil), c.resources...)
 	c.mu.RUnlock()
 
-	resources := resourceinternal.ObserveAll(resourceObservers)
+	resources := c.observeResources(resourceObservers)
 
 	slices.SortFunc(stages, func(a, b metrics.StageMetrics) int {
 		switch {
@@ -199,7 +204,7 @@ func (c *Coordinator) Tick() Decision {
 	}
 	c.mu.RUnlock()
 
-	resourceLevel := resourceinternal.MaxPressureLevel(resourceinternal.ObserveAll(resourceObservers))
+	resourceLevel := resourceinternal.MaxPressureLevel(c.observeResources(resourceObservers))
 	tickAt := now()
 
 	incomingBacklog := make(map[string]int, len(links))
@@ -236,6 +241,12 @@ func (c *Coordinator) Tick() Decision {
 		}
 		linkBacklog := incomingBacklog[stageName]
 		downstreamBacklog := outgoingBacklog[stageName]
+		idleShrinkCandidate := hasStageSnapshot &&
+			stageBacklog == 0 &&
+			linkBacklog == 0 &&
+			downstreamBacklog == 0 &&
+			activeWorkers < currentWorkers &&
+			currentWorkers > budget.MinWorkers
 
 		switch {
 		case currentWorkers < budget.MinWorkers:
@@ -256,13 +267,13 @@ func (c *Coordinator) Tick() Decision {
 
 		signal := stageSignal{}
 		switch {
-		case hasStageSnapshot && policy.forcesShrink(resourceLevel) && stageBacklog == 0 && linkBacklog == 0 && downstreamBacklog == 0 && currentWorkers > budget.MinWorkers:
+		case policy.forcesShrink(resourceLevel) && idleShrinkCandidate:
 			signal = stageSignal{direction: signalDown, reason: "resource_pressure"}
 		case !policy.brakesScaleUp(resourceLevel) && linkBacklog > 0:
 			signal = stageSignal{direction: signalUp, reason: "incoming_link_backlog"}
 		case !policy.brakesScaleUp(resourceLevel) && stageBacklog > 0:
 			signal = stageSignal{direction: signalUp, reason: "stage_backlog"}
-		case hasStageSnapshot && stageBacklog == 0 && linkBacklog == 0 && downstreamBacklog == 0 && activeWorkers < currentWorkers && currentWorkers > budget.MinWorkers:
+		case idleShrinkCandidate:
 			signal = stageSignal{direction: signalDown, reason: "idle_shrink"}
 		}
 
@@ -324,4 +335,11 @@ func mapsKeys[V any](m map[string]V) []string {
 	}
 
 	return keys
+}
+
+func (c *Coordinator) observeResources(observers []resourceinternal.Observer) resourceinternal.Snapshot {
+	c.resourceMu.Lock()
+	defer c.resourceMu.Unlock()
+
+	return resourceinternal.ObserveAll(observers)
 }

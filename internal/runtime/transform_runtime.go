@@ -326,7 +326,7 @@ func WalkInterruptible[T, U any](parent context.Context, source <-chan T, contro
 					controller.Release()
 				}()
 
-				if err := ctx.Err(); err != nil {
+				if err := workerCtx.Err(); err != nil {
 					return
 				}
 				if err := RunSafeFunc(func() error {

@@ -55,7 +55,9 @@ func WithDecisionObserver(observer func(observe.PipelineDecision)) CoordinatorOp
 }
 
 // WithResourceObserver registers one resource observer that the coordinator
-// polls during Tick.
+// polls during Snapshot and Tick. Polls from the same coordinator instance are
+// serialized, but adjacent Snapshot and Tick calls still perform independent
+// samples.
 func WithResourceObserver(observer observe.ResourceObserver) CoordinatorOption {
 	return func(opts *coordinatorOptions) {
 		if observer == nil {
